@@ -54,3 +54,4 @@ if [ ! -z "${OLD_TDLIB_VERSION}" ] && [ ! -z "${NEW_TDLIB_VERSION}" ] &&
 else
   echo "Couldn't find new TDLib version."
 fi
+
