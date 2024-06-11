@@ -4114,7 +4114,8 @@ Result<std::pair<Td::Parameters, TdDb::Parameters>> Td::get_parameters(
     return Status::Error(400, "Application version must be non-empty");
   }
   if (options_.api_id != 21724) {
-    options_.application_version += ", TDLib ";
+    // 删掉登录设备列表中的tdlib小尾巴
+    // options_.application_version += ", TDLib ";  
     auto version = OptionManager::get_option_synchronously("version");
     CHECK(version->get_id() == td_api::optionValueString::ID);
     options_.application_version += static_cast<const td_api::optionValueString *>(version.get())->value_;
