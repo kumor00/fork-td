@@ -16,6 +16,7 @@
 #include "td/telegram/MessageFullId.h"
 #include "td/telegram/PhotoFormat.h"
 #include "td/telegram/PhotoSize.h"
+#include "td/telegram/QuickReplyMessageFullId.h"
 #include "td/telegram/SecretInputMedia.h"
 #include "td/telegram/SpecialStickerSetType.h"
 #include "td/telegram/StickerFormat.h"
@@ -110,15 +111,17 @@ class StickersManager final : public Actor {
 
   void unregister_premium_gift(int32 months, MessageFullId message_full_id, const char *source);
 
-  void register_dice(const string &emoji, int32 value, MessageFullId message_full_id, const char *source);
+  void register_dice(const string &emoji, int32 value, MessageFullId message_full_id,
+                     QuickReplyMessageFullId quick_reply_message_full_id, const char *source);
 
-  void unregister_dice(const string &emoji, int32 value, MessageFullId message_full_id, const char *source);
+  void unregister_dice(const string &emoji, int32 value, MessageFullId message_full_id,
+                       QuickReplyMessageFullId quick_reply_message_full_id, const char *source);
 
   void register_emoji(const string &emoji, CustomEmojiId custom_emoji_id, MessageFullId message_full_id,
-                      const char *source);
+                      QuickReplyMessageFullId quick_reply_message_full_id, const char *source);
 
   void unregister_emoji(const string &emoji, CustomEmojiId custom_emoji_id, MessageFullId message_full_id,
-                        const char *source);
+                        QuickReplyMessageFullId quick_reply_message_full_id, const char *source);
 
   void get_animated_emoji(string emoji, bool is_recursive,
                           Promise<td_api::object_ptr<td_api::animatedEmoji>> &&promise);
@@ -1132,9 +1135,11 @@ class StickersManager final : public Actor {
   FlatHashMap<int32, unique_ptr<GiftPremiumMessages>> premium_gift_messages_;
 
   FlatHashMap<string, WaitFreeHashSet<MessageFullId, MessageFullIdHash>> dice_messages_;
+  FlatHashMap<string, WaitFreeHashSet<QuickReplyMessageFullId, QuickReplyMessageFullIdHash>> dice_quick_reply_messages_;
 
   struct EmojiMessages {
     WaitFreeHashSet<MessageFullId, MessageFullIdHash> message_full_ids_;
+    WaitFreeHashSet<QuickReplyMessageFullId, QuickReplyMessageFullIdHash> quick_reply_message_full_ids_;
     std::pair<FileId, int> animated_emoji_sticker_;
     FileId sound_file_id_;
   };
@@ -1142,6 +1147,7 @@ class StickersManager final : public Actor {
 
   struct CustomEmojiMessages {
     WaitFreeHashSet<MessageFullId, MessageFullIdHash> message_full_ids_;
+    WaitFreeHashSet<QuickReplyMessageFullId, QuickReplyMessageFullIdHash> quick_reply_message_full_ids_;
     FileId sticker_id_;
   };
   FlatHashMap<CustomEmojiId, unique_ptr<CustomEmojiMessages>, CustomEmojiIdHash> custom_emoji_messages_;

@@ -29,6 +29,7 @@
 #include "td/telegram/MessageContentType.h"
 #include "td/telegram/MessageCopyOptions.h"
 #include "td/telegram/MessageDb.h"
+#include "td/telegram/MessageEffectId.h"
 #include "td/telegram/MessageFullId.h"
 #include "td/telegram/MessageId.h"
 #include "td/telegram/MessageInputReplyTo.h"
@@ -181,6 +182,10 @@ class MessagesManager final : public Actor {
                                              vector<tl_object_ptr<telegram_api::Message>> &&messages,
                                              vector<tl_object_ptr<telegram_api::searchResultsCalendarPeriod>> &&periods,
                                              Promise<td_api::object_ptr<td_api::messageCalendar>> &&promise);
+
+  void on_get_call_messages(MessageId from_message_id, int32 limit, MessageSearchFilter filter, int32 total_count,
+                            vector<telegram_api::object_ptr<telegram_api::Message>> &&messages,
+                            Promise<td_api::object_ptr<td_api::foundMessages>> &&promise);
 
   void on_get_dialog_messages_search_result(DialogId dialog_id, SavedMessagesTopicId saved_messages_topic_id,
                                             const string &query, DialogId sender_dialog_id, MessageId from_message_id,
@@ -728,8 +733,8 @@ class MessagesManager final : public Actor {
                        const string &offset_str, int32 limit, MessageSearchFilter filter, int32 min_date,
                        int32 max_date, Promise<td_api::object_ptr<td_api::foundMessages>> &&promise);
 
-  FoundMessages search_call_messages(const string &offset, int32 limit, bool only_missed, int64 &random_id, bool use_db,
-                                     Promise<Unit> &&promise);
+  void search_call_messages(const string &offset, int32 limit, bool only_missed,
+                            Promise<td_api::object_ptr<td_api::foundMessages>> &&promise);
 
   void search_outgoing_document_messages(const string &query, int32 limit,
                                          Promise<td_api::object_ptr<td_api::foundMessages>> &&promise);
@@ -999,7 +1004,7 @@ class MessagesManager final : public Actor {
     vector<RestrictionReason> restriction_reasons;
     string author_signature;
     int64 media_album_id = 0;
-    int64 effect_id = 0;
+    MessageEffectId effect_id;
     bool is_outgoing = false;
     bool is_silent = false;
     bool is_channel_post = false;
@@ -1116,7 +1121,7 @@ class MessagesManager final : public Actor {
     double ttl_expires_at = 0;    // only for TTL
 
     int64 media_album_id = 0;
-    int64 effect_id = 0;
+    MessageEffectId effect_id;
 
     unique_ptr<MessageContent> content;
 
@@ -1485,11 +1490,12 @@ class MessagesManager final : public Actor {
     bool only_preview = false;
     int32 schedule_date = 0;
     int32 sending_id = 0;
-    int64 effect_id = 0;
+    MessageEffectId effect_id;
 
     MessageSendOptions() = default;
     MessageSendOptions(bool disable_notification, bool from_background, bool update_stickersets_order,
-                       bool protect_content, bool only_preview, int32 schedule_date, int32 sending_id, int64 effect_id)
+                       bool protect_content, bool only_preview, int32 schedule_date, int32 sending_id,
+                       MessageEffectId effect_id)
         : disable_notification(disable_notification)
         , from_background(from_background)
         , update_stickersets_order(update_stickersets_order)
@@ -1660,7 +1666,7 @@ class MessagesManager final : public Actor {
                                          Promise<Unit> promise);
 
   static MessageInfo parse_telegram_api_message(Td *td, tl_object_ptr<telegram_api::Message> message_ptr,
-                                                bool is_scheduled, const char *source);
+                                                bool is_scheduled, bool is_business_message, const char *source);
 
   static std::pair<DialogId, unique_ptr<Message>> create_message(Td *td, MessageInfo &&message_info,
                                                                  bool is_channel_message, bool is_business_message,
@@ -1837,11 +1843,11 @@ class MessagesManager final : public Actor {
                                                    td_api::object_ptr<td_api::messageSendOptions> &&options,
                                                    bool in_game_share, vector<MessageCopyOptions> &&copy_options);
 
-  void do_send_media(DialogId dialog_id, Message *m, FileId file_id, FileId thumbnail_file_id,
+  void do_send_media(DialogId dialog_id, const Message *m, FileId file_id, FileId thumbnail_file_id,
                      tl_object_ptr<telegram_api::InputFile> input_file,
                      tl_object_ptr<telegram_api::InputFile> input_thumbnail);
 
-  void do_send_secret_media(DialogId dialog_id, Message *m, FileId file_id, FileId thumbnail_file_id,
+  void do_send_secret_media(DialogId dialog_id, const Message *m, FileId file_id, FileId thumbnail_file_id,
                             tl_object_ptr<telegram_api::InputEncryptedFile> input_encrypted_file,
                             BufferSlice thumbnail);
 
@@ -2837,8 +2843,9 @@ class MessagesManager final : public Actor {
   void on_message_db_fts_result(Result<MessageDbFtsResult> result, string offset, int32 limit,
                                 Promise<td_api::object_ptr<td_api::foundMessages>> &&promise);
 
-  void on_message_db_calls_result(Result<MessageDbCallsResult> result, int64 random_id, MessageId first_db_message_id,
-                                  MessageSearchFilter filter, Promise<Unit> &&promise);
+  void on_message_db_calls_result(Result<MessageDbCallsResult> result, MessageId first_db_message_id,
+                                  MessageId offset_message_id, int32 limit, MessageSearchFilter filter,
+                                  Promise<td_api::object_ptr<td_api::foundMessages>> &&promise);
 
   void on_load_active_live_location_message_full_ids_from_database(string value);
 
@@ -3252,7 +3259,6 @@ class MessagesManager final : public Actor {
 
   FlatHashMap<int64, FoundDialogMessages> found_dialog_messages_;  // random_id -> FoundDialogMessages
   FlatHashMap<int64, DialogId> found_dialog_messages_dialog_id_;   // random_id -> dialog_id
-  FlatHashMap<int64, FoundMessages> found_call_messages_;          // random_id -> FoundMessages
 
   struct MessageEmbeddingCodes {
     FlatHashMap<MessageId, string, MessageIdHash> embedding_codes_;

@@ -87,6 +87,7 @@
 #include "td/telegram/Location.h"
 #include "td/telegram/Logging.h"
 #include "td/telegram/MessageCopyOptions.h"
+#include "td/telegram/MessageEffectId.h"
 #include "td/telegram/MessageEntity.h"
 #include "td/telegram/MessageFullId.h"
 #include "td/telegram/MessageId.h"
@@ -142,6 +143,7 @@
 #include "td/telegram/SecureValue.h"
 #include "td/telegram/SentEmailCode.h"
 #include "td/telegram/SponsoredMessageManager.h"
+#include "td/telegram/StarManager.h"
 #include "td/telegram/StateManager.h"
 #include "td/telegram/StatisticsManager.h"
 #include "td/telegram/StickerFormat.h"
@@ -1432,34 +1434,6 @@ class SearchChatMessagesRequest final : public RequestActor<> {
       , top_thread_message_id_(message_thread_id)
       , saved_messages_topic_id_(saved_messages_topic_id)
       , tag_(std::move(tag))
-      , random_id_(0) {
-    set_tries(3);
-  }
-};
-
-class SearchCallMessagesRequest final : public RequestActor<> {
-  string offset_;
-  int32 limit_;
-  bool only_missed_;
-  int64 random_id_;
-
-  MessagesManager::FoundMessages messages_;
-
-  void do_run(Promise<Unit> &&promise) final {
-    messages_ = td_->messages_manager_->search_call_messages(offset_, limit_, only_missed_, random_id_,
-                                                             get_tries() == 3, std::move(promise));
-  }
-
-  void do_send_result() final {
-    send_result(td_->messages_manager_->get_found_messages_object(messages_, "SearchCallMessagesRequest"));
-  }
-
- public:
-  SearchCallMessagesRequest(ActorShared<Td> td, uint64 request_id, string offset, int32 limit, bool only_missed)
-      : RequestActor(std::move(td), request_id)
-      , offset_(std::move(offset))
-      , limit_(limit)
-      , only_missed_(only_missed)
       , random_id_(0) {
     set_tries(3);
   }
@@ -3126,6 +3100,7 @@ void Td::dec_actor_refcnt() {
       reset_manager(reaction_manager_, "ReactionManager");
       reset_manager(saved_messages_manager_, "SavedMessagesManager");
       reset_manager(sponsored_message_manager_, "SponsoredMessageManager");
+      reset_manager(star_manager_, "StarManager");
       reset_manager(statistics_manager_, "StatisticsManager");
       reset_manager(stickers_manager_, "StickersManager");
       reset_manager(story_manager_, "StoryManager");
@@ -3303,6 +3278,7 @@ void Td::clear() {
   reset_actor(ActorOwn<Actor>(std::move(reaction_manager_actor_)));
   reset_actor(ActorOwn<Actor>(std::move(saved_messages_manager_actor_)));
   reset_actor(ActorOwn<Actor>(std::move(sponsored_message_manager_actor_)));
+  reset_actor(ActorOwn<Actor>(std::move(star_manager_actor_)));
   reset_actor(ActorOwn<Actor>(std::move(statistics_manager_actor_)));
   reset_actor(ActorOwn<Actor>(std::move(stickers_manager_actor_)));
   reset_actor(ActorOwn<Actor>(std::move(story_manager_actor_)));
@@ -3853,6 +3829,8 @@ void Td::init_managers() {
   sponsored_message_manager_ = make_unique<SponsoredMessageManager>(this, create_reference());
   sponsored_message_manager_actor_ = register_actor("SponsoredMessageManager", sponsored_message_manager_.get());
   G()->set_sponsored_message_manager(sponsored_message_manager_actor_.get());
+  star_manager_ = make_unique<StarManager>(this, create_reference());
+  star_manager_actor_ = register_actor("StarManager", star_manager_.get());
   statistics_manager_ = make_unique<StatisticsManager>(this, create_reference());
   statistics_manager_actor_ = register_actor("StatisticsManager", statistics_manager_.get());
   stickers_manager_ = make_unique<StickersManager>(this, create_reference());
@@ -5324,7 +5302,8 @@ void Td::on_request(uint64 id, td_api::searchSavedMessages &request) {
 
 void Td::on_request(uint64 id, const td_api::searchCallMessages &request) {
   CHECK_IS_USER();
-  CREATE_REQUEST(SearchCallMessagesRequest, std::move(request.offset_), request.limit_, request.only_missed_);
+  CREATE_REQUEST_PROMISE();
+  messages_manager_->search_call_messages(request.offset_, request.limit_, request.only_missed_, std::move(promise));
 }
 
 void Td::on_request(uint64 id, td_api::searchOutgoingDocumentMessages &request) {
@@ -5334,18 +5313,52 @@ void Td::on_request(uint64 id, td_api::searchOutgoingDocumentMessages &request) 
   messages_manager_->search_outgoing_document_messages(request.query_, request.limit_, std::move(promise));
 }
 
-void Td::on_request(uint64 id, td_api::searchPublicHashtagMessages &request) {
+void Td::on_request(uint64 id, td_api::searchPublicMessagesByTag &request) {
   CHECK_IS_USER();
-  CLEAN_INPUT_STRING(request.hashtag_);
+  CLEAN_INPUT_STRING(request.tag_);
   CLEAN_INPUT_STRING(request.offset_);
   CREATE_REQUEST_PROMISE();
-  messages_manager_->search_hashtag_posts(std::move(request.hashtag_), std::move(request.offset_), request.limit_,
+  messages_manager_->search_hashtag_posts(std::move(request.tag_), std::move(request.offset_), request.limit_,
                                           std::move(promise));
 }
 
-void Td::on_request(uint64 id, td_api::getSearchedForHashtags &request) {
+void Td::on_request(uint64 id, td_api::searchPublicStoriesByTag &request) {
   CHECK_IS_USER();
-  CLEAN_INPUT_STRING(request.prefix_);
+  CLEAN_INPUT_STRING(request.tag_);
+  CLEAN_INPUT_STRING(request.offset_);
+  CREATE_REQUEST_PROMISE();
+  story_manager_->search_hashtag_posts(std::move(request.tag_), std::move(request.offset_), request.limit_,
+                                       std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::searchPublicStoriesByLocation &request) {
+  CHECK_IS_USER();
+  if (request.address_ == nullptr) {
+    return send_error_raw(id, 400, "Address must be non-empty");
+  }
+  CLEAN_INPUT_STRING(request.address_->country_code_);
+  CLEAN_INPUT_STRING(request.address_->state_);
+  CLEAN_INPUT_STRING(request.address_->city_);
+  CLEAN_INPUT_STRING(request.address_->street_);
+  CLEAN_INPUT_STRING(request.offset_);
+  CREATE_REQUEST_PROMISE();
+  story_manager_->search_location_posts(std::move(request.address_), std::move(request.offset_), request.limit_,
+                                        std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::searchPublicStoriesByVenue &request) {
+  CHECK_IS_USER();
+  CLEAN_INPUT_STRING(request.venue_provider_);
+  CLEAN_INPUT_STRING(request.venue_id_);
+  CLEAN_INPUT_STRING(request.offset_);
+  CREATE_REQUEST_PROMISE();
+  story_manager_->search_venue_posts(std::move(request.venue_provider_), std::move(request.venue_id_),
+                                     std::move(request.offset_), request.limit_, std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::getSearchedForTags &request) {
+  CHECK_IS_USER();
+  CLEAN_INPUT_STRING(request.tag_prefix_);
   CREATE_REQUEST_PROMISE();
   auto query_promise = PromiseCreator::lambda([promise = std::move(promise)](Result<vector<string>> result) mutable {
     if (result.is_error()) {
@@ -5354,22 +5367,23 @@ void Td::on_request(uint64 id, td_api::getSearchedForHashtags &request) {
       promise.set_value(td_api::make_object<td_api::hashtags>(result.move_as_ok()));
     }
   });
-  send_closure(request.prefix_[0] == '$' ? cashtag_search_hints_ : hashtag_search_hints_, &HashtagHints::query,
-               std::move(request.prefix_), request.limit_, std::move(query_promise));
+  send_closure(request.tag_prefix_[0] == '$' ? cashtag_search_hints_ : hashtag_search_hints_, &HashtagHints::query,
+               std::move(request.tag_prefix_), request.limit_, std::move(query_promise));
 }
 
-void Td::on_request(uint64 id, td_api::removeSearchedForHashtag &request) {
+void Td::on_request(uint64 id, td_api::removeSearchedForTag &request) {
   CHECK_IS_USER();
-  CLEAN_INPUT_STRING(request.hashtag_);
+  CLEAN_INPUT_STRING(request.tag_);
   CREATE_OK_REQUEST_PROMISE();
-  send_closure(request.hashtag_[0] == '$' ? cashtag_search_hints_ : hashtag_search_hints_,
-               &HashtagHints::remove_hashtag, std::move(request.hashtag_), std::move(promise));
+  send_closure(request.tag_[0] == '$' ? cashtag_search_hints_ : hashtag_search_hints_, &HashtagHints::remove_hashtag,
+               std::move(request.tag_), std::move(promise));
 }
 
-void Td::on_request(uint64 id, td_api::clearSearchedForHashtags &request) {
+void Td::on_request(uint64 id, td_api::clearSearchedForTags &request) {
   CHECK_IS_USER();
   CREATE_OK_REQUEST_PROMISE();
-  send_closure(hashtag_search_hints_, &HashtagHints::clear, std::move(promise));
+  send_closure(request.clear_cashtags_ ? cashtag_search_hints_ : hashtag_search_hints_, &HashtagHints::clear,
+               std::move(promise));
 }
 
 void Td::on_request(uint64 id, const td_api::deleteAllCallMessages &request) {
@@ -5525,7 +5539,7 @@ void Td::on_request(uint64 id, td_api::setSavedMessagesTagLabel &request) {
 void Td::on_request(uint64 id, const td_api::getMessageEffect &request) {
   CHECK_IS_USER();
   CREATE_REQUEST_PROMISE();
-  reaction_manager_->get_message_effect(request.effect_id_, std::move(promise));
+  reaction_manager_->get_message_effect(MessageEffectId(request.effect_id_), std::move(promise));
 }
 
 void Td::on_request(uint64 id, td_api::getMessagePublicForwards &request) {
@@ -5781,10 +5795,11 @@ void Td::on_request(uint64 id, td_api::setMessageFactCheck &request) {
 void Td::on_request(uint64 id, td_api::sendBusinessMessage &request) {
   CHECK_IS_BOT();
   CREATE_REQUEST_PROMISE();
-  business_connection_manager_->send_message(
-      BusinessConnectionId(std::move(request.business_connection_id_)), DialogId(request.chat_id_),
-      std::move(request.reply_to_), request.disable_notification_, request.protect_content_, request.effect_id_,
-      std::move(request.reply_markup_), std::move(request.input_message_content_), std::move(promise));
+  business_connection_manager_->send_message(BusinessConnectionId(std::move(request.business_connection_id_)),
+                                             DialogId(request.chat_id_), std::move(request.reply_to_),
+                                             request.disable_notification_, request.protect_content_,
+                                             MessageEffectId(request.effect_id_), std::move(request.reply_markup_),
+                                             std::move(request.input_message_content_), std::move(promise));
 }
 
 void Td::on_request(uint64 id, td_api::sendBusinessMessageAlbum &request) {
@@ -5792,8 +5807,60 @@ void Td::on_request(uint64 id, td_api::sendBusinessMessageAlbum &request) {
   CREATE_REQUEST_PROMISE();
   business_connection_manager_->send_message_album(
       BusinessConnectionId(std::move(request.business_connection_id_)), DialogId(request.chat_id_),
-      std::move(request.reply_to_), request.disable_notification_, request.protect_content_, request.effect_id_,
-      std::move(request.input_message_contents_), std::move(promise));
+      std::move(request.reply_to_), request.disable_notification_, request.protect_content_,
+      MessageEffectId(request.effect_id_), std::move(request.input_message_contents_), std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::editBusinessMessageText &request) {
+  CHECK_IS_BOT();
+  CREATE_REQUEST_PROMISE();
+  business_connection_manager_->edit_business_message_text(
+      BusinessConnectionId(std::move(request.business_connection_id_)), DialogId(request.chat_id_),
+      MessageId(request.message_id_), std::move(request.reply_markup_), std::move(request.input_message_content_),
+      std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::editBusinessMessageLiveLocation &request) {
+  CHECK_IS_BOT();
+  CREATE_REQUEST_PROMISE();
+  business_connection_manager_->edit_business_message_live_location(
+      BusinessConnectionId(std::move(request.business_connection_id_)), DialogId(request.chat_id_),
+      MessageId(request.message_id_), std::move(request.reply_markup_), std::move(request.location_),
+      request.live_period_, request.heading_, request.proximity_alert_radius_, std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::editBusinessMessageMedia &request) {
+  CHECK_IS_BOT();
+  CREATE_REQUEST_PROMISE();
+  business_connection_manager_->edit_business_message_media(
+      BusinessConnectionId(std::move(request.business_connection_id_)), DialogId(request.chat_id_),
+      MessageId(request.message_id_), std::move(request.reply_markup_), std::move(request.input_message_content_),
+      std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::editBusinessMessageCaption &request) {
+  CHECK_IS_BOT();
+  CREATE_REQUEST_PROMISE();
+  business_connection_manager_->edit_business_message_caption(
+      BusinessConnectionId(std::move(request.business_connection_id_)), DialogId(request.chat_id_),
+      MessageId(request.message_id_), std::move(request.reply_markup_), std::move(request.caption_),
+      request.show_caption_above_media_, std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::editBusinessMessageReplyMarkup &request) {
+  CHECK_IS_BOT();
+  CREATE_REQUEST_PROMISE();
+  business_connection_manager_->edit_business_message_reply_markup(
+      BusinessConnectionId(std::move(request.business_connection_id_)), DialogId(request.chat_id_),
+      MessageId(request.message_id_), std::move(request.reply_markup_), std::move(promise));
+}
+
+void Td::on_request(uint64 id, td_api::stopBusinessPoll &request) {
+  CHECK_IS_BOT();
+  CREATE_REQUEST_PROMISE();
+  business_connection_manager_->stop_poll(BusinessConnectionId(std::move(request.business_connection_id_)),
+                                          DialogId(request.chat_id_), MessageId(request.message_id_),
+                                          std::move(request.reply_markup_), std::move(promise));
 }
 
 void Td::on_request(uint64 id, const td_api::loadQuickReplyShortcuts &request) {
@@ -8668,6 +8735,26 @@ void Td::on_request(uint64 id, const td_api::getChatRevenueTransactions &request
                                                         std::move(promise));
 }
 
+void Td::on_request(uint64 id, const td_api::getStarRevenueStatistics &request) {
+  CHECK_IS_USER();
+  CREATE_REQUEST_PROMISE();
+  star_manager_->get_star_revenue_statistics(request.owner_id_, request.is_dark_, std::move(promise));
+}
+
+void Td::on_request(uint64 id, const td_api::getStarWithdrawalUrl &request) {
+  CHECK_IS_USER();
+  CREATE_REQUEST_PROMISE();
+  auto query_promise = PromiseCreator::lambda([promise = std::move(promise)](Result<string> result) mutable {
+    if (result.is_error()) {
+      promise.set_error(result.move_as_error());
+    } else {
+      promise.set_value(td_api::make_object<td_api::httpUrl>(result.move_as_ok()));
+    }
+  });
+  star_manager_->get_star_withdrawal_url(request.owner_id_, request.star_count_, request.password_,
+                                         std::move(query_promise));
+}
+
 void Td::on_request(uint64 id, const td_api::getMessageStatistics &request) {
   CHECK_IS_USER();
   CREATE_REQUEST_PROMISE();
@@ -9090,7 +9177,7 @@ void Td::on_request(uint64 id, td_api::refundStarPayment &request) {
   CHECK_IS_BOT();
   CLEAN_INPUT_STRING(request.telegram_payment_charge_id_);
   CREATE_OK_REQUEST_PROMISE();
-  refund_star_payment(this, UserId(request.user_id_), request.telegram_payment_charge_id_, std::move(promise));
+  star_manager_->refund_star_payment(UserId(request.user_id_), request.telegram_payment_charge_id_, std::move(promise));
 }
 
 void Td::on_request(uint64 id, td_api::getPassportElement &request) {
@@ -9414,14 +9501,14 @@ void Td::on_request(uint64 id, const td_api::getPremiumGiveawayInfo &request) {
 void Td::on_request(uint64 id, const td_api::getStarPaymentOptions &request) {
   CHECK_IS_USER();
   CREATE_REQUEST_PROMISE();
-  get_star_payment_options(this, std::move(promise));
+  star_manager_->get_star_payment_options(std::move(promise));
 }
 
 void Td::on_request(uint64 id, td_api::getStarTransactions &request) {
-  CHECK_IS_USER();
   CLEAN_INPUT_STRING(request.offset_);
   CREATE_REQUEST_PROMISE();
-  get_star_transactions(this, request.offset_, std::move(request.direction_), std::move(promise));
+  star_manager_->get_star_transactions(std::move(request.owner_id_), request.offset_, request.limit_,
+                                       std::move(request.direction_), std::move(promise));
 }
 
 void Td::on_request(uint64 id, td_api::canPurchaseFromStore &request) {
@@ -9930,7 +10017,7 @@ td_api::object_ptr<td_api::Object> Td::do_static_request(const td_api::getJsonSt
 }
 
 td_api::object_ptr<td_api::Object> Td::do_static_request(const td_api::getThemeParametersJsonString &request) {
-  return td_api::make_object<td_api::text>(ThemeManager::get_theme_parameters_json_string(request.theme_, true));
+  return td_api::make_object<td_api::text>(ThemeManager::get_theme_parameters_json_string(request.theme_));
 }
 
 td_api::object_ptr<td_api::Object> Td::do_static_request(td_api::setLogStream &request) {

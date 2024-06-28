@@ -90,6 +90,7 @@ class SavedMessagesManager;
 class SecureManager;
 class SecretChatsManager;
 class SponsoredMessageManager;
+class StarManager;
 class StateManager;
 class StatisticsManager;
 class StickersManager;
@@ -247,6 +248,8 @@ class Td final : public Actor {
   ActorOwn<SavedMessagesManager> saved_messages_manager_actor_;
   unique_ptr<SponsoredMessageManager> sponsored_message_manager_;
   ActorOwn<SponsoredMessageManager> sponsored_message_manager_actor_;
+  unique_ptr<StarManager> star_manager_;
+  ActorOwn<StarManager> star_manager_actor_;
   unique_ptr<StatisticsManager> statistics_manager_;
   ActorOwn<StatisticsManager> statistics_manager_actor_;
   unique_ptr<StickersManager> stickers_manager_;
@@ -798,13 +801,19 @@ class Td final : public Actor {
 
   void on_request(uint64 id, td_api::searchOutgoingDocumentMessages &request);
 
-  void on_request(uint64 id, td_api::searchPublicHashtagMessages &request);
+  void on_request(uint64 id, td_api::searchPublicMessagesByTag &request);
 
-  void on_request(uint64 id, td_api::getSearchedForHashtags &request);
+  void on_request(uint64 id, td_api::searchPublicStoriesByTag &request);
 
-  void on_request(uint64 id, td_api::removeSearchedForHashtag &request);
+  void on_request(uint64 id, td_api::searchPublicStoriesByLocation &request);
 
-  void on_request(uint64 id, td_api::clearSearchedForHashtags &request);
+  void on_request(uint64 id, td_api::searchPublicStoriesByVenue &request);
+
+  void on_request(uint64 id, td_api::getSearchedForTags &request);
+
+  void on_request(uint64 id, td_api::removeSearchedForTag &request);
+
+  void on_request(uint64 id, td_api::clearSearchedForTags &request);
 
   void on_request(uint64 id, const td_api::deleteAllCallMessages &request);
 
@@ -909,6 +918,18 @@ class Td final : public Actor {
   void on_request(uint64 id, td_api::sendBusinessMessage &request);
 
   void on_request(uint64 id, td_api::sendBusinessMessageAlbum &request);
+
+  void on_request(uint64 id, td_api::editBusinessMessageText &request);
+
+  void on_request(uint64 id, td_api::editBusinessMessageLiveLocation &request);
+
+  void on_request(uint64 id, td_api::editBusinessMessageMedia &request);
+
+  void on_request(uint64 id, td_api::editBusinessMessageCaption &request);
+
+  void on_request(uint64 id, td_api::editBusinessMessageReplyMarkup &request);
+
+  void on_request(uint64 id, td_api::stopBusinessPoll &request);
 
   void on_request(uint64 id, const td_api::loadQuickReplyShortcuts &request);
 
@@ -1675,6 +1696,10 @@ class Td final : public Actor {
   void on_request(uint64 id, const td_api::getChatRevenueWithdrawalUrl &request);
 
   void on_request(uint64 id, const td_api::getChatRevenueTransactions &request);
+
+  void on_request(uint64 id, const td_api::getStarRevenueStatistics &request);
+
+  void on_request(uint64 id, const td_api::getStarWithdrawalUrl &request);
 
   void on_request(uint64 id, const td_api::getMessageStatistics &request);
 
