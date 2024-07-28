@@ -525,7 +525,7 @@ class Td final : public Actor {
 
   void on_request(uint64 id, const td_api::getCurrentState &request);
 
-  void on_request(uint64 id, td_api::getPasswordState &request);
+  void on_request(uint64 id, const td_api::getPasswordState &request);
 
   void on_request(uint64 id, td_api::setPassword &request);
 
@@ -675,7 +675,7 @@ class Td final : public Actor {
 
   void on_request(uint64 id, td_api::getStorageStatisticsFast &request);
 
-  void on_request(uint64 id, td_api::getDatabaseStatistics &request);
+  void on_request(uint64 id, const td_api::getDatabaseStatistics &request);
 
   void on_request(uint64 id, td_api::optimizeStorage &request);
 
@@ -1013,7 +1013,7 @@ class Td final : public Actor {
 
   void on_request(uint64 id, td_api::resendMessages &request);
 
-  void on_request(uint64 id, td_api::getWebPagePreview &request);
+  void on_request(uint64 id, td_api::getLinkPreview &request);
 
   void on_request(uint64 id, td_api::getWebPageInstantView &request);
 
@@ -1335,7 +1335,7 @@ class Td final : public Actor {
 
   void on_request(uint64 id, const td_api::getSuggestedFileName &request);
 
-  void on_request(uint64 id, td_api::preliminaryUploadFile &request);
+  void on_request(uint64 id, const td_api::preliminaryUploadFile &request);
 
   void on_request(uint64 id, const td_api::cancelPreliminaryUploadFile &request);
 

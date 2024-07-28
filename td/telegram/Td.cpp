@@ -4255,7 +4255,7 @@ void Td::on_request(uint64 id, const td_api::getCurrentState &request) {
   send_result(id, td_api::make_object<td_api::updates>(std::move(updates)));
 }
 
-void Td::on_request(uint64 id, td_api::getPasswordState &request) {
+void Td::on_request(uint64 id, const td_api::getPasswordState &request) {
   CHECK_IS_USER();
   CREATE_REQUEST_PROMISE();
   send_closure(password_manager_, &PasswordManager::get_state, std::move(promise));
@@ -4787,7 +4787,7 @@ void Td::on_request(uint64 id, td_api::getStorageStatisticsFast &request) {
   });
   send_closure(storage_manager_, &StorageManager::get_storage_stats_fast, std::move(query_promise));
 }
-void Td::on_request(uint64 id, td_api::getDatabaseStatistics &request) {
+void Td::on_request(uint64 id, const td_api::getDatabaseStatistics &request) {
   CREATE_REQUEST_PROMISE();
   auto query_promise = PromiseCreator::lambda([promise = std::move(promise)](Result<DatabaseStats> result) mutable {
     if (result.is_error()) {
@@ -6186,7 +6186,7 @@ void Td::on_request(uint64 id, td_api::resendMessages &request) {
                messages_manager_->get_messages_object(-1, dialog_id, r_message_ids.ok(), false, "resendMessages"));
 }
 
-void Td::on_request(uint64 id, td_api::getWebPagePreview &request) {
+void Td::on_request(uint64 id, td_api::getLinkPreview &request) {
   CHECK_IS_USER();
   CREATE_REQUEST_PROMISE();
   web_pages_manager_->get_web_page_preview(std::move(request.text_), std::move(request.link_preview_options_),
@@ -7492,7 +7492,7 @@ void Td::on_request(uint64 id, const td_api::getSuggestedFileName &request) {
   send_closure(actor_id(this), &Td::send_result, id, td_api::make_object<td_api::text>(r_file_name.ok()));
 }
 
-void Td::on_request(uint64 id, td_api::preliminaryUploadFile &request) {
+void Td::on_request(uint64 id, const td_api::preliminaryUploadFile &request) {
   auto priority = request.priority_;
   if (!(1 <= priority && priority <= 32)) {
     return send_error_raw(id, 400, "Upload priority must be between 1 and 32");
@@ -9848,7 +9848,7 @@ td_api::object_ptr<td_api::Object> Td::do_static_request(const td_api::getTextEn
   }
   auto text_entities = find_entities(request.text_, false, false);
   return make_tl_object<td_api::textEntities>(
-      get_text_entities_object(text_entities, false, std::numeric_limits<int32>::max()));
+      get_text_entities_object(nullptr, text_entities, false, std::numeric_limits<int32>::max()));
 }
 
 td_api::object_ptr<td_api::Object> Td::do_static_request(td_api::parseTextEntities &request) {
@@ -9886,7 +9886,7 @@ td_api::object_ptr<td_api::Object> Td::do_static_request(td_api::parseTextEntiti
   }
 
   return make_tl_object<td_api::formattedText>(std::move(request.text_),
-                                               get_text_entities_object(r_entities.ok(), false, -1));
+                                               get_text_entities_object(nullptr, r_entities.ok(), false, -1));
 }
 
 td_api::object_ptr<td_api::Object> Td::do_static_request(td_api::parseMarkdown &request) {
@@ -9906,7 +9906,7 @@ td_api::object_ptr<td_api::Object> Td::do_static_request(td_api::parseMarkdown &
 
   auto parsed_text = parse_markdown_v3({std::move(request.text_->text_), std::move(entities)});
   fix_formatted_text(parsed_text.text, parsed_text.entities, true, true, true, true, true).ensure();
-  return get_formatted_text_object(parsed_text, false, std::numeric_limits<int32>::max());
+  return get_formatted_text_object(nullptr, parsed_text, false, std::numeric_limits<int32>::max());
 }
 
 td_api::object_ptr<td_api::Object> Td::do_static_request(const td_api::getOption &request) {
@@ -9931,8 +9931,8 @@ td_api::object_ptr<td_api::Object> Td::do_static_request(td_api::getMarkdownText
     return make_error(400, status.message());
   }
 
-  return get_formatted_text_object(get_markdown_v3({std::move(request.text_->text_), std::move(entities)}), false,
-                                   std::numeric_limits<int32>::max());
+  return get_formatted_text_object(nullptr, get_markdown_v3({std::move(request.text_->text_), std::move(entities)}),
+                                   false, std::numeric_limits<int32>::max());
 }
 
 td_api::object_ptr<td_api::Object> Td::do_static_request(td_api::searchStringsByPrefix &request) {

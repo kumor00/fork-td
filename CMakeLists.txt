@@ -6,7 +6,7 @@ if (POLICY CMP0065)
   cmake_policy(SET CMP0065 NEW)
 endif()
 
-project(TDLib VERSION 1.8.32 LANGUAGES CXX C)
+project(TDLib VERSION 1.8.33 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_MODULE_PATH)
   set(CMAKE_MODULE_PATH "")
@@ -330,6 +330,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/BackgroundInfo.cpp
   td/telegram/BackgroundManager.cpp
   td/telegram/BackgroundType.cpp
+  td/telegram/BaseTheme.cpp
   td/telegram/Birthdate.cpp
   td/telegram/BoostManager.cpp
   td/telegram/BotCommand.cpp
@@ -400,13 +401,13 @@ set(TDLIB_SOURCE_PART1
   td/telegram/files/FileBitmask.cpp
   td/telegram/files/FileDb.cpp
   td/telegram/files/FileDownloader.cpp
+  td/telegram/files/FileDownloadManager.cpp
   td/telegram/files/FileEncryptionKey.cpp
   td/telegram/files/FileFromBytes.cpp
   td/telegram/files/FileGcParameters.cpp
   td/telegram/files/FileGcWorker.cpp
   td/telegram/files/FileGenerateManager.cpp
   td/telegram/files/FileHashUploader.cpp
-  td/telegram/files/FileLoader.cpp
   td/telegram/files/FileLoaderUtils.cpp
   td/telegram/files/FileLoadManager.cpp
   td/telegram/files/FileManager.cpp
@@ -414,6 +415,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/files/FileStatsWorker.cpp
   td/telegram/files/FileType.cpp
   td/telegram/files/FileUploader.cpp
+  td/telegram/files/FileUploadManager.cpp
   td/telegram/files/PartsManager.cpp
   td/telegram/files/ResourceManager.cpp
   td/telegram/ForumTopic.cpp
@@ -572,6 +574,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/TdDb.cpp
   td/telegram/TermsOfService.cpp
   td/telegram/ThemeManager.cpp
+  td/telegram/ThemeSettings.cpp
   td/telegram/TimeZoneManager.cpp
   td/telegram/TopDialogCategory.cpp
   td/telegram/TopDialogManager.cpp
@@ -606,6 +609,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/BackgroundInfo.h
   td/telegram/BackgroundManager.h
   td/telegram/BackgroundType.h
+  td/telegram/BaseTheme.h
   td/telegram/Birthdate.h
   td/telegram/BlockListId.h
   td/telegram/BoostManager.h
@@ -693,6 +697,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/files/FileDb.h
   td/telegram/files/FileDbId.h
   td/telegram/files/FileDownloader.h
+  td/telegram/files/FileDownloadManager.h
   td/telegram/files/FileEncryptionKey.h
   td/telegram/files/FileFromBytes.h
   td/telegram/files/FileGcParameters.h
@@ -701,7 +706,6 @@ set(TDLIB_SOURCE_PART2
   td/telegram/files/FileHashUploader.h
   td/telegram/files/FileId.h
   td/telegram/files/FileLoaderActor.h
-  td/telegram/files/FileLoader.h
   td/telegram/files/FileLoaderUtils.h
   td/telegram/files/FileLoadManager.h
   td/telegram/files/FileLocation.h
@@ -711,6 +715,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/files/FileStatsWorker.h
   td/telegram/files/FileType.h
   td/telegram/files/FileUploader.h
+  td/telegram/files/FileUploadManager.h
   td/telegram/files/PartsManager.h
   td/telegram/files/ResourceManager.h
   td/telegram/files/ResourceState.h
@@ -912,6 +917,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/TdDb.h
   td/telegram/TermsOfService.h
   td/telegram/ThemeManager.h
+  td/telegram/ThemeSettings.h
   td/telegram/TimeZoneManager.h
   td/telegram/TopDialogCategory.h
   td/telegram/TopDialogManager.h
@@ -1009,6 +1015,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StoryInteractionInfo.hpp
   td/telegram/StoryStealthMode.hpp
   td/telegram/SuggestedAction.hpp
+  td/telegram/ThemeSettings.hpp
   td/telegram/TranscriptionInfo.hpp
   td/telegram/VideoNotesManager.hpp
   td/telegram/VideosManager.hpp
