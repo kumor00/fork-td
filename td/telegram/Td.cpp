@@ -1406,9 +1406,8 @@ Result<std::pair<Td::Parameters, TdDb::Parameters>> Td::get_parameters(
   //  CHECK(version->get_id() == td_api::optionValueString::ID);
   //  options_.application_version += static_cast<const td_api::optionValueString *>(version.get())->value_;
   //}
-  // options_.language_pack = string();
   options_.language_code = string();
-  options_.language_pack = "tdesktop";
+  options_.language_pack = string();
   options_.parameters = string();
   options_.is_emulator = false;
   options_.proxy = Proxy();
