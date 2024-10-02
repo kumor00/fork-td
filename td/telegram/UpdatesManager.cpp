@@ -39,6 +39,7 @@
 #include "td/telegram/LanguagePackManager.h"
 #include "td/telegram/Location.h"
 #include "td/telegram/MessageId.h"
+#include "td/telegram/MessageReaction.h"
 #include "td/telegram/MessageSender.h"
 #include "td/telegram/MessagesManager.h"
 #include "td/telegram/MessageTtl.h"
@@ -357,6 +358,11 @@ void UpdatesManager::fill_pts_gap(void *td) {
 
   CHECK(td != nullptr);
   auto updates_manager = static_cast<Td *>(td)->updates_manager_.get();
+  if (updates_manager->expect_pts_gap_) {
+    updates_manager->expect_pts_gap_ = false;
+    return fill_gap(td, string());
+  }
+
   auto min_pts = std::numeric_limits<int32>::max();
   auto min_pts_count = 0;
   const telegram_api::Update *first_update = nullptr;
@@ -980,6 +986,7 @@ bool UpdatesManager::is_acceptable_message(const telegram_api::Message *message_
         case telegram_api::messageActionBoostApply::ID:
         case telegram_api::messageActionRequestedPeerSentMe::ID:
         case telegram_api::messageActionGiftStars::ID:
+        case telegram_api::messageActionPrizeStars::ID:
           break;
         case telegram_api::messageActionChatCreate::ID: {
           auto chat_create = static_cast<const telegram_api::messageActionChatCreate *>(action);
@@ -2246,6 +2253,7 @@ void UpdatesManager::try_reload_data() {
   td_->chat_manager_->reload_created_public_dialogs(PublicDialogType::ForPersonalDialog, Auto());
   get_default_emoji_statuses(td_, Auto());
   get_default_channel_emoji_statuses(td_, Auto());
+  reload_paid_reaction_privacy(td_);
   td_->notification_settings_manager_->reload_saved_ringtones(Auto());
   td_->notification_settings_manager_->send_get_reaction_notification_settings_query(Auto());
   td_->notification_settings_manager_->send_get_scope_notification_settings_query(NotificationSettingsScope::Private,
@@ -2907,6 +2915,11 @@ void UpdatesManager::add_pending_pts_update(tl_object_ptr<telegram_api::Update> 
     return;
   }
 
+  if (pts_count == 0 && receive_time < Time::now() - MAX_UNFILLED_GAP_TIME && update->get_id() == dummyUpdate::ID) {
+    // don't warn about fetching of affected history
+    expect_pts_gap_ = true;
+  }
+
   pending_pts_updates_.emplace(std::move(update), new_pts, pts_count, receive_time, std::move(promise));
 
   if (old_pts < accumulated_pts_ - accumulated_pts_count_) {
@@ -3050,8 +3063,8 @@ void UpdatesManager::process_qts_update(tl_object_ptr<telegram_api::Update> &&up
         auto message_id = MessageId(ServerMessageId(update->msg_id_));
         auto date = update->date_;
         if (!dialog_id.is_valid() || !message_id.is_valid() || date <= 0) {
-          LOG(ERROR) << "Receive invalid " << to_string(update->reactions_);
-          return;
+          LOG(ERROR) << "Receive invalid " << to_string(update);
+          break;
         }
         vector<td_api::object_ptr<td_api::messageReaction>> message_reactions;
         for (const auto &reaction_count : update->reactions_) {
@@ -3069,6 +3082,19 @@ void UpdatesManager::process_qts_update(tl_object_ptr<telegram_api::Update> &&up
                      td_api::make_object<td_api::updateMessageReactions>(
                          td_->dialog_manager_->get_chat_id_object(dialog_id, "updateMessageReactions"),
                          message_id.get(), date, std::move(message_reactions)));
+        break;
+      }
+      case telegram_api::updateBotPurchasedPaidMedia::ID: {
+        auto update = move_tl_object_as<telegram_api::updateBotPurchasedPaidMedia>(update_ptr);
+        auto user_id = UserId(update->user_id_);
+        if (!user_id.is_valid()) {
+          LOG(ERROR) << "Receive invalid " << to_string(update);
+          break;
+        }
+        send_closure(
+            G()->td(), &Td::send_update,
+            td_api::make_object<td_api::updatePaidMediaPurchased>(
+                td_->user_manager_->get_user_id_object(user_id, "updatePaidMediaPurchased"), update->payload_));
         break;
       }
       case telegram_api::updateBotBusinessConnect::ID: {
@@ -3743,6 +3769,11 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateSavedReactionTa
   promise.set_value(Unit());
 }
 
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updatePaidReactionPrivacy> update, Promise<Unit> &&promise) {
+  td_->option_manager_->set_option_boolean("is_paid_reaction_anonymous", update->private_);
+  promise.set_value(Unit());
+}
+
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateAttachMenuBots> update, Promise<Unit> &&promise) {
   td_->attach_menu_manager_->reload_attach_menu_bots(std::move(promise));
 }
@@ -3889,6 +3920,7 @@ bool UpdatesManager::is_qts_update(const telegram_api::Update *update) {
     case telegram_api::updateBotNewBusinessMessage::ID:
     case telegram_api::updateBotEditBusinessMessage::ID:
     case telegram_api::updateBotDeleteBusinessMessage::ID:
+    case telegram_api::updateBotPurchasedPaidMedia::ID:
       return true;
     default:
       return false;
@@ -3923,6 +3955,8 @@ int32 UpdatesManager::get_update_qts(const telegram_api::Update *update) {
       return static_cast<const telegram_api::updateBotEditBusinessMessage *>(update)->qts_;
     case telegram_api::updateBotDeleteBusinessMessage::ID:
       return static_cast<const telegram_api::updateBotDeleteBusinessMessage *>(update)->qts_;
+    case telegram_api::updateBotPurchasedPaidMedia::ID:
+      return static_cast<const telegram_api::updateBotPurchasedPaidMedia *>(update)->qts_;
     default:
       return 0;
   }
@@ -4424,6 +4458,12 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateBotMessageReact
 }
 
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateBotMessageReactions> update, Promise<Unit> &&promise) {
+  auto qts = update->qts_;
+  add_pending_qts_update(std::move(update), qts, std::move(promise));
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateBotPurchasedPaidMedia> update,
+                               Promise<Unit> &&promise) {
   auto qts = update->qts_;
   add_pending_qts_update(std::move(update), qts, std::move(promise));
 }

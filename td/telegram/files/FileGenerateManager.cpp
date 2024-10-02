@@ -97,8 +97,9 @@ class FileDownloadGenerateActor final : public FileGenerateActor {
                 [file_type = file_type_, file_id = file_id_, callback = std::move(callback_)]() mutable {
                   auto file_view = G()->td().get_actor_unsafe()->file_manager_->get_file_view(file_id);
                   CHECK(!file_view.empty());
-                  if (file_view.has_local_location()) {
-                    auto location = file_view.local_location();
+                  const auto *full_local_location = file_view.get_full_local_location();
+                  if (full_local_location != nullptr) {
+                    auto location = *full_local_location;
                     location.file_type_ = file_type;
                     callback->on_ok(std::move(location));
                   } else {
@@ -351,7 +352,7 @@ class FileExternalGenerateActor final : public FileGenerateActor {
       return Status::Error(400, "Invalid local prefix size");
     }
     callback_->on_partial_generate(PartialLocalFileLocation{generate_location_.file_type_, local_prefix_size, path_, "",
-                                                            Bitmask(Bitmask::Ones{}, 1).encode()},
+                                                            Bitmask(Bitmask::Ones{}, 1).encode(), local_prefix_size},
                                    expected_size);
     return Status::OK();
   }

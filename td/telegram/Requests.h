@@ -14,6 +14,7 @@
 
 #include "td/utils/common.h"
 #include "td/utils/FlatHashMap.h"
+#include "td/utils/MovableValue.h"
 #include "td/utils/Promise.h"
 #include "td/utils/Slice.h"
 #include "td/utils/Status.h"
@@ -85,15 +86,15 @@ class Requests {
   };
 
   template <class T>
-  class RequestPromise
+  class RequestPromise final
       : public PromiseInterface<T>
       , private RequestPromiseBase {
    public:
-    void set_value(T &&value) override {
+    void set_value(T &&value) final {
       RequestPromiseBase::set_value(std::move(value));
     }
 
-    void set_error(Status &&error) override {
+    void set_error(Status &&error) final {
       RequestPromiseBase::set_error(std::move(error));
     }
 
@@ -477,7 +478,9 @@ class Requests {
 
   void on_request(uint64 id, const td_api::addMessageReaction &request);
 
-  void on_request(uint64 id, const td_api::addPaidMessageReaction &request);
+  void on_request(uint64 id, const td_api::addPendingPaidMessageReaction &request);
+
+  void on_request(uint64 id, const td_api::commitPendingPaidMessageReactions &request);
 
   void on_request(uint64 id, const td_api::removePendingPaidMessageReactions &request);
 
@@ -1237,6 +1240,8 @@ class Requests {
 
   void on_request(uint64 id, const td_api::getStickerSet &request);
 
+  void on_request(uint64 id, const td_api::getStickerSetName &request);
+
   void on_request(uint64 id, td_api::searchStickerSet &request);
 
   void on_request(uint64 id, td_api::searchInstalledStickerSets &request);
@@ -1421,7 +1426,7 @@ class Requests {
 
   void on_request(uint64 id, td_api::answerInlineQuery &request);
 
-  void on_request(uint64 id, td_api::getPopularWebAppBots &request);
+  void on_request(uint64 id, td_api::getGrossingWebAppBots &request);
 
   void on_request(uint64 id, td_api::searchWebApp &request);
 
@@ -1539,13 +1544,15 @@ class Requests {
 
   void on_request(uint64 id, td_api::applyPremiumGiftCode &request);
 
-  void on_request(uint64 id, td_api::launchPrepaidPremiumGiveaway &request);
+  void on_request(uint64 id, td_api::launchPrepaidGiveaway &request);
 
-  void on_request(uint64 id, const td_api::getPremiumGiveawayInfo &request);
+  void on_request(uint64 id, const td_api::getGiveawayInfo &request);
 
   void on_request(uint64 id, const td_api::getStarPaymentOptions &request);
 
   void on_request(uint64 id, const td_api::getStarGiftPaymentOptions &request);
+
+  void on_request(uint64 id, const td_api::getStarGiveawayPaymentOptions &request);
 
   void on_request(uint64 id, td_api::getStarTransactions &request);
 
