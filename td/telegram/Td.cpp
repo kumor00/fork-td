@@ -1399,15 +1399,16 @@ Result<std::pair<Td::Parameters, TdDb::Parameters>> Td::get_parameters(
   if (options_.application_version.empty()) {
     return Status::Error(400, "Application version must be non-empty");
   }
-  //£¡£¡£¡
+  // ï¼ï¼ï¼
   //if (options_.api_id != 21724) {
   //  options_.application_version += ", TDLib ";
   //  auto version = OptionManager::get_option_synchronously("version");
   //  CHECK(version->get_id() == td_api::optionValueString::ID);
   //  options_.application_version += static_cast<const td_api::optionValueString *>(version.get())->value_;
   //}
-  options_.language_pack = string();
+  // options_.language_pack = string();
   options_.language_code = string();
+  options_.language_pack = "tdesktop";
   options_.parameters = string();
   options_.is_emulator = false;
   options_.proxy = Proxy();
