@@ -534,7 +534,8 @@ WebPageId WebPagesManager::on_get_web_page(tl_object_ptr<telegram_api::WebPage> 
         }
         if (web_page_to_delete->file_source_id_.is_valid()) {
           td_->file_manager_->change_files_source(web_page_to_delete->file_source_id_,
-                                                  get_web_page_file_ids(web_page_to_delete), vector<FileId>());
+                                                  get_web_page_file_ids(web_page_to_delete), vector<FileId>(),
+                                                  "on_get_web_page");
         }
         web_pages_.erase(web_page_id);
       }
@@ -595,7 +596,7 @@ WebPageId WebPagesManager::on_get_web_page(tl_object_ptr<telegram_api::WebPage> 
         int32 document_id = web_page->document_->get_id();
         if (document_id == telegram_api::document::ID) {
           auto parsed_document = td_->documents_manager_->on_get_document(
-              move_tl_object_as<telegram_api::document>(web_page->document_), owner_dialog_id);
+              move_tl_object_as<telegram_api::document>(web_page->document_), owner_dialog_id, false);
           page->document_ = std::move(parsed_document);
         }
       }
@@ -608,7 +609,7 @@ WebPageId WebPagesManager::on_get_web_page(tl_object_ptr<telegram_api::WebPage> 
               int32 document_id = document->get_id();
               if (document_id == telegram_api::document::ID) {
                 auto parsed_document = td_->documents_manager_->on_get_document(
-                    move_tl_object_as<telegram_api::document>(document), owner_dialog_id);
+                    move_tl_object_as<telegram_api::document>(document), owner_dialog_id, false);
                 if (!parsed_document.empty()) {
                   page->documents_.push_back(std::move(parsed_document));
                 }
@@ -734,7 +735,8 @@ void WebPagesManager::update_web_page(unique_ptr<WebPage> web_page, WebPageId we
 
   auto new_file_ids = get_web_page_file_ids(page.get());
   if (old_file_ids != new_file_ids) {
-    td_->file_manager_->change_files_source(get_web_page_file_source_id(page.get()), old_file_ids, new_file_ids);
+    td_->file_manager_->change_files_source(get_web_page_file_source_id(page.get()), old_file_ids, new_file_ids,
+                                            "update_web_page");
   }
 
   if (is_changed && !from_database) {
@@ -1157,7 +1159,8 @@ void WebPagesManager::on_load_web_page_instant_view_from_database(WebPageId web_
 
   auto new_file_ids = get_web_page_file_ids(web_page);
   if (old_file_ids != new_file_ids) {
-    td_->file_manager_->change_files_source(get_web_page_file_source_id(web_page), old_file_ids, new_file_ids);
+    td_->file_manager_->change_files_source(get_web_page_file_source_id(web_page), old_file_ids, new_file_ids,
+                                            "on_load_web_page_instant_view_from_database");
   }
 
   update_web_page_instant_view_load_requests(web_page_id, false, web_page_id);
@@ -2134,7 +2137,7 @@ void WebPagesManager::on_get_web_page_instant_view(WebPage *web_page, tl_object_
     if (document_ptr->get_id() == telegram_api::document::ID) {
       auto document = move_tl_object_as<telegram_api::document>(document_ptr);
       auto document_id = document->id_;
-      auto parsed_document = td_->documents_manager_->on_get_document(std::move(document), owner_dialog_id);
+      auto parsed_document = td_->documents_manager_->on_get_document(std::move(document), owner_dialog_id, false);
       if (!parsed_document.empty() && document_id != 0) {
         get_map(parsed_document.type)->emplace(document_id, parsed_document.file_id);
       }

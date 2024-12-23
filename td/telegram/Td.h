@@ -6,7 +6,6 @@
 //
 #pragma once
 
-#include "td/telegram/files/FileId.h"
 #include "td/telegram/net/MtprotoHeader.h"
 #include "td/telegram/net/NetQuery.h"
 #include "td/telegram/net/NetQueryStats.h"
@@ -85,17 +84,20 @@ class PrivacyManager;
 class PromoDataManager;
 class QuickReplyManager;
 class ReactionManager;
+class ReferralProgramManager;
 class Requests;
 class SavedMessagesManager;
 class SecureManager;
 class SecretChatsManager;
 class SponsoredMessageManager;
+class StarGiftManager;
 class StarManager;
 class StateManager;
 class StatisticsManager;
 class StickersManager;
 class StorageManager;
 class StoryManager;
+class SuggestedActionManager;
 class TermsOfServiceManager;
 class ThemeManager;
 class TimeZoneManager;
@@ -107,6 +109,7 @@ class UserManager;
 class VideoNotesManager;
 class VideosManager;
 class VoiceNotesManager;
+class WebAppManager;
 class WebPagesManager;
 
 extern int VERBOSITY_NAME(td_init);
@@ -237,10 +240,14 @@ class Td final : public Actor {
   ActorOwn<QuickReplyManager> quick_reply_manager_actor_;
   unique_ptr<ReactionManager> reaction_manager_;
   ActorOwn<ReactionManager> reaction_manager_actor_;
+  unique_ptr<ReferralProgramManager> referral_program_manager_;
+  ActorOwn<ReferralProgramManager> referral_program_manager_actor_;
   unique_ptr<SavedMessagesManager> saved_messages_manager_;
   ActorOwn<SavedMessagesManager> saved_messages_manager_actor_;
   unique_ptr<SponsoredMessageManager> sponsored_message_manager_;
   ActorOwn<SponsoredMessageManager> sponsored_message_manager_actor_;
+  unique_ptr<StarGiftManager> star_gift_manager_;
+  ActorOwn<StarGiftManager> star_gift_manager_actor_;
   unique_ptr<StarManager> star_manager_;
   ActorOwn<StarManager> star_manager_actor_;
   unique_ptr<StatisticsManager> statistics_manager_;
@@ -249,6 +256,8 @@ class Td final : public Actor {
   ActorOwn<StickersManager> stickers_manager_actor_;
   unique_ptr<StoryManager> story_manager_;
   ActorOwn<StoryManager> story_manager_actor_;
+  unique_ptr<SuggestedActionManager> suggested_action_manager_;
+  ActorOwn<SuggestedActionManager> suggested_action_manager_actor_;
   unique_ptr<TermsOfServiceManager> terms_of_service_manager_;
   ActorOwn<TermsOfServiceManager> terms_of_service_manager_actor_;
   unique_ptr<ThemeManager> theme_manager_;
@@ -269,6 +278,8 @@ class Td final : public Actor {
   ActorOwn<VideoNotesManager> video_notes_manager_actor_;
   unique_ptr<VoiceNotesManager> voice_notes_manager_;
   ActorOwn<VoiceNotesManager> voice_notes_manager_actor_;
+  unique_ptr<WebAppManager> web_app_manager_;
+  ActorOwn<WebAppManager> web_app_manager_actor_;
   unique_ptr<WebPagesManager> web_pages_manager_;
   ActorOwn<WebPagesManager> web_pages_manager_actor_;
 
@@ -396,8 +407,6 @@ class Td final : public Actor {
   std::shared_ptr<ResultHandler> extract_handler(uint64 id);
 
   void clear_requests();
-
-  void on_file_download_finished(FileId file_id);
 
   std::shared_ptr<ActorContext> old_context_;
 
