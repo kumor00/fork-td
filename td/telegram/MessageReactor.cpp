@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -31,6 +31,16 @@ td_api::object_ptr<td_api::paidReactor> MessageReactor::get_paid_reactor_object(
 
 void MessageReactor::add_dependencies(Dependencies &dependencies) const {
   dependencies.add_message_sender_dependencies(dialog_id_);
+}
+
+PaidReactionType MessageReactor::get_paid_reaction_type(DialogId my_dialog_id) const {
+  if (is_anonymous_ || !dialog_id_.is_valid()) {
+    return PaidReactionType::legacy(true);
+  }
+  if (dialog_id_ == my_dialog_id) {
+    return PaidReactionType::legacy(false);
+  }
+  return PaidReactionType::dialog(dialog_id_);
 }
 
 bool MessageReactor::fix_is_me(DialogId my_dialog_id) {
