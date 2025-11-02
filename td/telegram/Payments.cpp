@@ -15,9 +15,7 @@
 #include "td/telegram/Global.h"
 #include "td/telegram/InputInvoice.h"
 #include "td/telegram/LinkManager.h"
-#include "td/telegram/MessageEntity.h"
 #include "td/telegram/MessageId.h"
-#include "td/telegram/MessageQuote.h"
 #include "td/telegram/MessagesManager.h"
 #include "td/telegram/misc.h"
 #include "td/telegram/PasswordManager.h"
@@ -86,6 +84,38 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
         return Status::Error(400, "Purpose must be non-empty");
       }
       switch (invoice->purpose_->get_id()) {
+        case td_api::telegramPaymentPurposePremiumGift::ID: {
+          auto p = static_cast<td_api::telegramPaymentPurposePremiumGift *>(invoice->purpose_.get());
+          TRY_RESULT(input_user, td->user_manager_->get_input_user(UserId(p->user_id_)));
+          TRY_STATUS(check_payment_amount(p->currency_, p->amount_));
+          TRY_RESULT(text, get_premium_gift_text(td, std::move(p->text_)));
+
+          if (p->currency_ == "XTR") {
+            int32 flags = 0;
+            if (text != nullptr) {
+              flags |= telegram_api::inputInvoicePremiumGiftStars::MESSAGE_MASK;
+            }
+            result.star_count_ = max(p->amount_, static_cast<int64>(0));
+            result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoicePremiumGiftStars>(
+                flags, std::move(input_user), p->month_count_, std::move(text));
+            break;
+          }
+
+          int32 flags = 0;
+          if (text != nullptr) {
+            flags |= telegram_api::inputStorePaymentPremiumGiftCode::MESSAGE_MASK;
+          }
+          auto option = telegram_api::make_object<telegram_api::premiumGiftCodeOption>(0, 1, p->month_count_, string(),
+                                                                                       0, p->currency_, p->amount_);
+          vector<telegram_api::object_ptr<telegram_api::InputUser>> input_users;
+          input_users.push_back(std::move(input_user));
+          auto purpose = telegram_api::make_object<telegram_api::inputStorePaymentPremiumGiftCode>(
+              flags, std::move(input_users), nullptr, p->currency_, p->amount_, std::move(text));
+
+          result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoicePremiumGiftCode>(
+              std::move(purpose), std::move(option));
+          break;
+        }
         case td_api::telegramPaymentPurposePremiumGiftCodes::ID: {
           auto p = static_cast<td_api::telegramPaymentPurposePremiumGiftCodes *>(invoice->purpose_.get());
           vector<telegram_api::object_ptr<telegram_api::InputUser>> input_users;
@@ -93,27 +123,14 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
             TRY_RESULT(input_user, td->user_manager_->get_input_user(UserId(user_id)));
             input_users.push_back(std::move(input_user));
           }
-          if (p->amount_ <= 0 || !check_currency_amount(p->amount_)) {
-            return Status::Error(400, "Invalid amount of the currency specified");
-          }
-          if (!clean_input_string(p->currency_)) {
-            return Status::Error(400, "Strings must be encoded in UTF-8");
-          }
+          TRY_STATUS(check_payment_amount(p->currency_, p->amount_));
           DialogId boosted_dialog_id(p->boosted_chat_id_);
           TRY_RESULT(boost_input_peer, get_boost_input_peer(td, boosted_dialog_id));
-          TRY_RESULT(message, get_formatted_text(td, td->dialog_manager_->get_my_dialog_id(), std::move(p->text_),
-                                                 false, true, true, false));
-          MessageQuote::remove_unallowed_quote_entities(message);
+          TRY_RESULT(text, get_premium_gift_text(td, std::move(p->text_)));
 
-          int32 flags = 0;
-          if (boost_input_peer != nullptr) {
-            flags |= telegram_api::inputStorePaymentPremiumGiftCode::BOOST_PEER_MASK;
-          }
-          telegram_api::object_ptr<telegram_api::textWithEntities> text;
-          if (!message.text.empty()) {
+          int32 flags = telegram_api::inputStorePaymentPremiumGiftCode::BOOST_PEER_MASK;
+          if (text != nullptr) {
             flags |= telegram_api::inputStorePaymentPremiumGiftCode::MESSAGE_MASK;
-            text = get_input_text_with_entities(td->user_manager_.get(), message,
-                                                "telegramPaymentPurposePremiumGiftCodes");
           }
           auto option = telegram_api::make_object<telegram_api::premiumGiftCodeOption>(
               0, static_cast<int32>(input_users.size()), p->month_count_, string(), 0, p->currency_, p->amount_);
@@ -127,12 +144,7 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
         }
         case td_api::telegramPaymentPurposePremiumGiveaway::ID: {
           auto p = static_cast<td_api::telegramPaymentPurposePremiumGiveaway *>(invoice->purpose_.get());
-          if (p->amount_ <= 0 || !check_currency_amount(p->amount_)) {
-            return Status::Error(400, "Invalid amount of the currency specified");
-          }
-          if (!clean_input_string(p->currency_)) {
-            return Status::Error(400, "Strings must be encoded in UTF-8");
-          }
+          TRY_STATUS(check_payment_amount(p->currency_, p->amount_));
           TRY_RESULT(parameters, GiveawayParameters::get_giveaway_parameters(td, p->parameters_.get()));
           auto option = telegram_api::make_object<telegram_api::premiumGiftCodeOption>(
               0, p->winner_count_, p->month_count_, string(), 0, p->currency_, p->amount_);
@@ -142,16 +154,21 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
         }
         case td_api::telegramPaymentPurposeStars::ID: {
           auto p = static_cast<td_api::telegramPaymentPurposeStars *>(invoice->purpose_.get());
-          if (p->amount_ <= 0 || !check_currency_amount(p->amount_)) {
-            return Status::Error(400, "Invalid amount of the currency specified");
+          int32 flags = 0;
+          telegram_api::object_ptr<telegram_api::InputPeer> spend_purpose_input_peer;
+          DialogId spend_dialog_id(p->chat_id_);
+          if (spend_dialog_id != DialogId()) {
+            TRY_STATUS(td->dialog_manager_->check_dialog_access(spend_dialog_id, false, AccessRights::Read,
+                                                                "telegramPaymentPurposeStars"));
+            spend_purpose_input_peer = td->dialog_manager_->get_input_peer(spend_dialog_id, AccessRights::Read);
+            CHECK(spend_purpose_input_peer != nullptr);
+            flags |= telegram_api::inputStorePaymentStarsTopup::SPEND_PURPOSE_PEER_MASK;
           }
-          if (!clean_input_string(p->currency_)) {
-            return Status::Error(400, "Strings must be encoded in UTF-8");
-          }
+          TRY_STATUS(check_payment_amount(p->currency_, p->amount_));
           dismiss_suggested_action(SuggestedAction{SuggestedAction::Type::StarsSubscriptionLowBalance},
                                    Promise<Unit>());
-          auto purpose = telegram_api::make_object<telegram_api::inputStorePaymentStarsTopup>(p->star_count_,
-                                                                                              p->currency_, p->amount_);
+          auto purpose = telegram_api::make_object<telegram_api::inputStorePaymentStarsTopup>(
+              flags, p->star_count_, p->currency_, p->amount_, std::move(spend_purpose_input_peer));
           result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoiceStars>(std::move(purpose));
           break;
         }
@@ -159,12 +176,7 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
           auto p = static_cast<td_api::telegramPaymentPurposeGiftedStars *>(invoice->purpose_.get());
           UserId user_id(p->user_id_);
           TRY_RESULT(input_user, td->user_manager_->get_input_user(user_id));
-          if (p->amount_ <= 0 || !check_currency_amount(p->amount_)) {
-            return Status::Error(400, "Invalid amount of the currency specified");
-          }
-          if (!clean_input_string(p->currency_)) {
-            return Status::Error(400, "Strings must be encoded in UTF-8");
-          }
+          TRY_STATUS(check_payment_amount(p->currency_, p->amount_));
           auto purpose = telegram_api::make_object<telegram_api::inputStorePaymentStarsGift>(
               std::move(input_user), p->star_count_, p->currency_, p->amount_);
           result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoiceStars>(std::move(purpose));
@@ -172,12 +184,7 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
         }
         case td_api::telegramPaymentPurposeStarGiveaway::ID: {
           auto p = static_cast<td_api::telegramPaymentPurposeStarGiveaway *>(invoice->purpose_.get());
-          if (p->amount_ <= 0 || !check_currency_amount(p->amount_)) {
-            return Status::Error(400, "Invalid amount of the currency specified");
-          }
-          if (!clean_input_string(p->currency_)) {
-            return Status::Error(400, "Strings must be encoded in UTF-8");
-          }
+          TRY_STATUS(check_payment_amount(p->currency_, p->amount_));
           TRY_RESULT(parameters, GiveawayParameters::get_giveaway_parameters(td, p->parameters_.get()));
           auto purpose = parameters.get_input_store_payment_stars_giveaway(td, p->currency_, p->amount_,
                                                                            p->winner_count_, p->star_count_);
@@ -256,14 +263,15 @@ class SetBotPreCheckoutAnswerQuery final : public Td::ResultHandler {
 
   void send(int64 pre_checkout_query_id, const string &error_message) {
     int32 flags = 0;
+    bool is_success = false;
     if (!error_message.empty()) {
       flags |= telegram_api::messages_setBotPrecheckoutResults::ERROR_MASK;
     } else {
-      flags |= telegram_api::messages_setBotPrecheckoutResults::SUCCESS_MASK;
+      is_success = true;
     }
 
-    send_query(G()->net_query_creator().create(telegram_api::messages_setBotPrecheckoutResults(
-        flags, false /*ignored*/, pre_checkout_query_id, error_message)));
+    send_query(G()->net_query_creator().create(
+        telegram_api::messages_setBotPrecheckoutResults(flags, is_success, pre_checkout_query_id, error_message)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -298,14 +306,12 @@ static tl_object_ptr<td_api::invoice> convert_invoice(tl_object_ptr<telegram_api
   CHECK(invoice != nullptr);
 
   auto labeled_prices = transform(std::move(invoice->prices_), convert_labeled_price);
-  bool is_test = (invoice->flags_ & telegram_api::invoice::TEST_MASK) != 0;
-  bool need_name = (invoice->flags_ & telegram_api::invoice::NAME_REQUESTED_MASK) != 0;
-  bool need_phone_number = (invoice->flags_ & telegram_api::invoice::PHONE_REQUESTED_MASK) != 0;
-  bool need_email_address = (invoice->flags_ & telegram_api::invoice::EMAIL_REQUESTED_MASK) != 0;
-  bool need_shipping_address = (invoice->flags_ & telegram_api::invoice::SHIPPING_ADDRESS_REQUESTED_MASK) != 0;
-  bool send_phone_number_to_provider = (invoice->flags_ & telegram_api::invoice::PHONE_TO_PROVIDER_MASK) != 0;
-  bool send_email_address_to_provider = (invoice->flags_ & telegram_api::invoice::EMAIL_TO_PROVIDER_MASK) != 0;
-  bool is_flexible = (invoice->flags_ & telegram_api::invoice::FLEXIBLE_MASK) != 0;
+  bool need_phone_number = invoice->phone_requested_;
+  bool need_email_address = invoice->email_requested_;
+  bool need_shipping_address = invoice->shipping_address_requested_;
+  bool send_phone_number_to_provider = invoice->phone_to_provider_;
+  bool send_email_address_to_provider = invoice->email_to_provider_;
+  bool is_flexible = invoice->flexible_;
   if (send_phone_number_to_provider) {
     need_phone_number = true;
   }
@@ -335,9 +341,9 @@ static tl_object_ptr<td_api::invoice> convert_invoice(tl_object_ptr<telegram_api
   }
   return td_api::make_object<td_api::invoice>(
       std::move(invoice->currency_), std::move(labeled_prices), max(invoice->subscription_period_, 0),
-      invoice->max_tip_amount_, std::move(invoice->suggested_tip_amounts_), recurring_terms_url, terms_url, is_test,
-      need_name, need_phone_number, need_email_address, need_shipping_address, send_phone_number_to_provider,
-      send_email_address_to_provider, is_flexible);
+      invoice->max_tip_amount_, std::move(invoice->suggested_tip_amounts_), recurring_terms_url, terms_url,
+      invoice->test_, invoice->name_requested_, need_phone_number, need_email_address, need_shipping_address,
+      send_phone_number_to_provider, send_email_address_to_provider, is_flexible);
 }
 
 static tl_object_ptr<td_api::PaymentProvider> convert_payment_provider(
@@ -586,7 +592,7 @@ class GetPaymentFormQuery final : public Td::ResultHandler {
       }
       case telegram_api::payments_paymentFormStarGift::ID:
         LOG(ERROR) << "Receive " << to_string(payment_form_ptr);
-        promise_.set_error(Status::Error(500, "Unsupported"));
+        promise_.set_error(500, "Unsupported");
         break;
       default:
         UNREACHABLE();
@@ -612,16 +618,11 @@ class ValidateRequestedInfoQuery final : public Td::ResultHandler {
             bool allow_save) {
     dialog_id_ = input_invoice_info.dialog_id_;
 
-    int32 flags = 0;
-    if (allow_save) {
-      flags |= telegram_api::payments_validateRequestedInfo::SAVE_MASK;
-    }
     if (requested_info == nullptr) {
-      requested_info = make_tl_object<telegram_api::paymentRequestedInfo>();
-      requested_info->flags_ = 0;
+      requested_info = telegram_api::make_object<telegram_api::paymentRequestedInfo>();
     }
     send_query(G()->net_query_creator().create(telegram_api::payments_validateRequestedInfo(
-        flags, false /*ignored*/, std::move(input_invoice_info.input_invoice_), std::move(requested_info))));
+        0, allow_save, std::move(input_invoice_info.input_invoice_), std::move(requested_info))));
   }
 
   void on_result(BufferSlice packet) final {
@@ -894,15 +895,8 @@ class ClearSavedInfoQuery final : public Td::ResultHandler {
 
   void send(bool clear_credentials, bool clear_order_info) {
     CHECK(clear_credentials || clear_order_info);
-    int32 flags = 0;
-    if (clear_credentials) {
-      flags |= telegram_api::payments_clearSavedInfo::CREDENTIALS_MASK;
-    }
-    if (clear_order_info) {
-      flags |= telegram_api::payments_clearSavedInfo::INFO_MASK;
-    }
-    send_query(G()->net_query_creator().create(
-        telegram_api::payments_clearSavedInfo(flags, false /*ignored*/, false /*ignored*/)));
+    send_query(
+        G()->net_query_creator().create(telegram_api::payments_clearSavedInfo(0, clear_credentials, clear_order_info)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -1024,25 +1018,25 @@ void answer_shipping_query(Td *td, int64 shipping_query_id,
   vector<tl_object_ptr<telegram_api::shippingOption>> options;
   for (auto &option : shipping_options) {
     if (option == nullptr) {
-      return promise.set_error(Status::Error(400, "Shipping option must be non-empty"));
+      return promise.set_error(400, "Shipping option must be non-empty");
     }
     if (!clean_input_string(option->id_)) {
-      return promise.set_error(Status::Error(400, "Shipping option identifier must be encoded in UTF-8"));
+      return promise.set_error(400, "Shipping option identifier must be encoded in UTF-8");
     }
     if (!clean_input_string(option->title_)) {
-      return promise.set_error(Status::Error(400, "Shipping option title must be encoded in UTF-8"));
+      return promise.set_error(400, "Shipping option title must be encoded in UTF-8");
     }
 
     vector<tl_object_ptr<telegram_api::labeledPrice>> prices;
     for (auto &price_part : option->price_parts_) {
       if (price_part == nullptr) {
-        return promise.set_error(Status::Error(400, "Shipping option price part must be non-empty"));
+        return promise.set_error(400, "Shipping option price part must be non-empty");
       }
       if (!clean_input_string(price_part->label_)) {
-        return promise.set_error(Status::Error(400, "Shipping option price part label must be encoded in UTF-8"));
+        return promise.set_error(400, "Shipping option price part label must be encoded in UTF-8");
       }
       if (!check_currency_amount(price_part->amount_)) {
-        return promise.set_error(Status::Error(400, "Too big amount of the currency specified"));
+        return promise.set_error(400, "Too big amount of the currency specified");
       }
 
       prices.push_back(make_tl_object<telegram_api::labeledPrice>(std::move(price_part->label_), price_part->amount_));
@@ -1082,32 +1076,32 @@ void validate_order_info(Td *td, td_api::object_ptr<td_api::InputInvoice> &&inpu
 
   if (order_info != nullptr) {
     if (!clean_input_string(order_info->name_)) {
-      return promise.set_error(Status::Error(400, "Name must be encoded in UTF-8"));
+      return promise.set_error(400, "Name must be encoded in UTF-8");
     }
     if (!clean_input_string(order_info->phone_number_)) {
-      return promise.set_error(Status::Error(400, "Phone number must be encoded in UTF-8"));
+      return promise.set_error(400, "Phone number must be encoded in UTF-8");
     }
     if (!clean_input_string(order_info->email_address_)) {
-      return promise.set_error(Status::Error(400, "Email address must be encoded in UTF-8"));
+      return promise.set_error(400, "Email address must be encoded in UTF-8");
     }
     if (order_info->shipping_address_ != nullptr) {
       if (!clean_input_string(order_info->shipping_address_->country_code_)) {
-        return promise.set_error(Status::Error(400, "Country code must be encoded in UTF-8"));
+        return promise.set_error(400, "Country code must be encoded in UTF-8");
       }
       if (!clean_input_string(order_info->shipping_address_->state_)) {
-        return promise.set_error(Status::Error(400, "State must be encoded in UTF-8"));
+        return promise.set_error(400, "State must be encoded in UTF-8");
       }
       if (!clean_input_string(order_info->shipping_address_->city_)) {
-        return promise.set_error(Status::Error(400, "City must be encoded in UTF-8"));
+        return promise.set_error(400, "City must be encoded in UTF-8");
       }
       if (!clean_input_string(order_info->shipping_address_->street_line1_)) {
-        return promise.set_error(Status::Error(400, "Street address must be encoded in UTF-8"));
+        return promise.set_error(400, "Street address must be encoded in UTF-8");
       }
       if (!clean_input_string(order_info->shipping_address_->street_line2_)) {
-        return promise.set_error(Status::Error(400, "Street address must be encoded in UTF-8"));
+        return promise.set_error(400, "Street address must be encoded in UTF-8");
       }
       if (!clean_input_string(order_info->shipping_address_->postal_code_)) {
-        return promise.set_error(Status::Error(400, "Postal code must be encoded in UTF-8"));
+        return promise.set_error(400, "Postal code must be encoded in UTF-8");
       }
     }
   }
@@ -1124,10 +1118,10 @@ void send_payment_form(Td *td, td_api::object_ptr<td_api::InputInvoice> &&input_
 
   if (credentials == nullptr) {
     if (tip_amount != 0 || !order_info_id.empty() || !shipping_option_id.empty()) {
-      return promise.set_error(Status::Error(400, "Invalid payment form parameters specified"));
+      return promise.set_error(400, "Invalid payment form parameters specified");
     }
     if (!td->star_manager_->has_owned_star_count(input_invoice_info.star_count_)) {
-      return promise.set_error(Status::Error(400, "Have not enough Telegram Stars to complete payment"));
+      return promise.set_error(400, "Have not enough Telegram Stars to complete payment");
     }
     td->create_handler<SendStarPaymentFormQuery>(std::move(promise))
         ->send(std::move(input_invoice_info), payment_form_id);
@@ -1140,11 +1134,11 @@ void send_payment_form(Td *td, td_api::object_ptr<td_api::InputInvoice> &&input_
       auto credentials_saved = static_cast<const td_api::inputCredentialsSaved *>(credentials.get());
       auto credentials_id = credentials_saved->saved_credentials_id_;
       if (!clean_input_string(credentials_id)) {
-        return promise.set_error(Status::Error(400, "Credentials identifier must be encoded in UTF-8"));
+        return promise.set_error(400, "Credentials identifier must be encoded in UTF-8");
       }
       auto temp_password_state = PasswordManager::get_temp_password_state_sync();
       if (!temp_password_state.has_temp_password) {
-        return promise.set_error(Status::Error(400, "Temporary password required to use saved credentials"));
+        return promise.set_error(400, "Temporary password required to use saved credentials");
       }
 
       input_credentials = make_tl_object<telegram_api::inputPaymentCredentialsSaved>(
@@ -1153,13 +1147,8 @@ void send_payment_form(Td *td, td_api::object_ptr<td_api::InputInvoice> &&input_
     }
     case td_api::inputCredentialsNew::ID: {
       auto credentials_new = static_cast<const td_api::inputCredentialsNew *>(credentials.get());
-      int32 flags = 0;
-      if (credentials_new->allow_save_) {
-        flags |= telegram_api::inputPaymentCredentials::SAVE_MASK;
-      }
-
       input_credentials = make_tl_object<telegram_api::inputPaymentCredentials>(
-          flags, false /*ignored*/, make_tl_object<telegram_api::dataJSON>(credentials_new->data_));
+          0, credentials_new->allow_save_, make_tl_object<telegram_api::dataJSON>(credentials_new->data_));
       break;
     }
     case td_api::inputCredentialsGooglePay::ID: {
@@ -1206,7 +1195,7 @@ void delete_saved_credentials(Td *td, Promise<Unit> &&promise) {
 void export_invoice(Td *td, BusinessConnectionId business_connection_id,
                     td_api::object_ptr<td_api::InputMessageContent> &&invoice, Promise<string> &&promise) {
   if (invoice == nullptr) {
-    return promise.set_error(Status::Error(400, "Invoice must be non-empty"));
+    return promise.set_error(400, "Invoice must be non-empty");
   }
   TRY_RESULT_PROMISE(promise, input_invoice,
                      InputInvoice::process_input_message_invoice(std::move(invoice), td, DialogId()));
@@ -1229,13 +1218,13 @@ void get_bank_card_info(Td *td, const string &bank_card_number,
 void get_collectible_info(Td *td, td_api::object_ptr<td_api::CollectibleItemType> type,
                           Promise<td_api::object_ptr<td_api::collectibleItemInfo>> &&promise) {
   if (type == nullptr) {
-    return promise.set_error(Status::Error(400, "Item type must be non-empty"));
+    return promise.set_error(400, "Item type must be non-empty");
   }
   switch (type->get_id()) {
     case td_api::collectibleItemTypeUsername::ID: {
       auto username = td_api::move_object_as<td_api::collectibleItemTypeUsername>(type);
       if (!clean_input_string(username->username_)) {
-        return promise.set_error(Status::Error(400, "Username must be encoded in UTF-8"));
+        return promise.set_error(400, "Username must be encoded in UTF-8");
       }
       td->create_handler<GetCollectibleInfoQuery>(std::move(promise))
           ->send(telegram_api::make_object<telegram_api::inputCollectibleUsername>(username->username_));
@@ -1244,7 +1233,7 @@ void get_collectible_info(Td *td, td_api::object_ptr<td_api::CollectibleItemType
     case td_api::collectibleItemTypePhoneNumber::ID: {
       auto phone_number = td_api::move_object_as<td_api::collectibleItemTypePhoneNumber>(type);
       if (!clean_input_string(phone_number->phone_number_)) {
-        return promise.set_error(Status::Error(400, "Phone number must be encoded in UTF-8"));
+        return promise.set_error(400, "Phone number must be encoded in UTF-8");
       }
       td->create_handler<GetCollectibleInfoQuery>(std::move(promise))
           ->send(telegram_api::make_object<telegram_api::inputCollectiblePhone>(phone_number->phone_number_));

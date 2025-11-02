@@ -605,7 +605,7 @@ void NotificationManager::on_get_notifications_from_database(NotificationGroupId
   auto group_it = get_group(group_id);
   CHECK(group_it != groups_.end());
   auto &group = group_it->second;
-  CHECK(group.is_being_loaded_from_database == true);
+  CHECK(group.is_being_loaded_from_database);
   group.is_being_loaded_from_database = false;
 
   if (r_notifications.is_error()) {
@@ -1114,7 +1114,7 @@ void NotificationManager::flush_pending_updates(int32 group_id, const char *sour
   // all other additions and edits can be merged to the first addition/edit
   // i.e. in edit+delete+add chain we want to remove deletion and merge addition to the edit
 
-  auto group_key = group_keys_[NotificationGroupId(group_id)];
+  const auto &group_key = group_keys_[NotificationGroupId(group_id)];
   bool is_hidden = group_key.last_notification_date == 0 || get_last_updated_group_key() < group_key;
   bool is_changed = true;
   while (is_changed) {
@@ -1866,10 +1866,10 @@ void NotificationManager::remove_notification(NotificationGroupId group_id, Noti
                                               bool is_permanent, bool force_update, Promise<Unit> &&promise,
                                               const char *source) {
   if (!group_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Notification group identifier is invalid"));
+    return promise.set_error(400, "Notification group identifier is invalid");
   }
   if (!notification_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Notification identifier is invalid"));
+    return promise.set_error(400, "Notification identifier is invalid");
   }
 
   if (is_disabled() || max_notification_group_count_ == 0) {
@@ -2010,10 +2010,10 @@ void NotificationManager::remove_notification_group(NotificationGroupId group_id
                                                     NotificationObjectId max_object_id, int32 new_total_count,
                                                     bool force_update, Promise<Unit> &&promise) {
   if (!group_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Group identifier is invalid"));
+    return promise.set_error(400, "Group identifier is invalid");
   }
   if (!max_notification_id.is_valid() && !max_object_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Notification identifier is invalid"));
+    return promise.set_error(400, "Notification identifier is invalid");
   }
 
   if (is_disabled() || max_notification_group_count_ == 0) {
@@ -2757,7 +2757,7 @@ void NotificationManager::process_push_notification(string payload, Promise<Unit
   });
 
   if (is_disabled() || payload == "{}") {
-    return promise.set_error(Status::Error(200, "Immediate success"));
+    return promise.set_error(200, "Immediate success");
   }
 
   auto r_receiver_id = get_push_receiver_id(payload);
@@ -2781,7 +2781,7 @@ void NotificationManager::process_push_notification(string payload, Promise<Unit
         auto r_payload = decrypt_push(key.first, key.second.str(), std::move(payload));
         if (r_payload.is_error()) {
           LOG(ERROR) << "Failed to decrypt push: " << r_payload.error();
-          return promise.set_error(Status::Error(400, "Failed to decrypt push payload"));
+          return promise.set_error(400, "Failed to decrypt push payload");
         }
         payload = r_payload.move_as_ok();
         was_encrypted = true;
@@ -2804,14 +2804,14 @@ void NotificationManager::process_push_notification(string payload, Promise<Unit
       }
 
       LOG(ERROR) << "Receive error " << status << ", while parsing push payload " << payload;
-      return promise.set_error(Status::Error(400, status.message()));
+      return promise.set_error(400, status.message());
     }
     // promise will be set after updateNotificationGroup is sent to the client
     return;
   }
 
   VLOG(notifications) << "Failed to process push notification";
-  promise.set_error(Status::Error(200, "Immediate success"));
+  promise.set_error(200, "Immediate success");
 }
 
 string NotificationManager::convert_loc_key(const string &loc_key) {
@@ -2823,11 +2823,18 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
       {"CHAT_DELETE_YOU", "MESSAGE_CHAT_DELETE_MEMBER_YOU"},
       {"CHAT_JOINED", "MESSAGE_CHAT_JOIN_BY_LINK"},
       {"CHAT_LEFT", "MESSAGE_CHAT_DELETE_MEMBER_LEFT"},
+      {"CHAT_LIVESTREAM_END", "MESSAGE_CHAT_LIVESTREAM_END"},
+      {"CHAT_LIVESTREAM_START", "MESSAGE_CHAT_LIVESTREAM_START"},
       {"CHAT_PHOTO_EDITED", "MESSAGE_CHAT_CHANGE_PHOTO"},
       {"CHAT_REQ_JOINED", "MESSAGE_CHAT_JOIN_BY_REQUEST"},
       {"CHAT_RETURNED", "MESSAGE_CHAT_ADD_MEMBERS_RETURNED"},
       {"CHAT_TITLE_EDITED", "MESSAGE_CHAT_CHANGE_TITLE"},
+      {"CHAT_VOICECHAT_END", "MESSAGE_CHAT_VOICECHAT_END"},
+      {"CHAT_VOICECHAT_INVITE", "MESSAGE_CHAT_VOICECHAT_INVITE"},
+      {"CHAT_VOICECHAT_INVITE_YOU", "MESSAGE_CHAT_VOICECHAT_INVITE_YOU"},
+      {"CHAT_VOICECHAT_START", "MESSAGE_CHAT_VOICECHAT_START"},
       {"CONTACT_JOINED", "MESSAGE_CONTACT_REGISTERED"},
+      {"CONTACT_JOINED_PREMIUM", "MESSAGE_CONTACT_REGISTERED_PREMIUM"},
       {"ENCRYPTED_MESSAGE", "MESSAGE"},
       {"MESSAGES", "MESSAGES"},
       {"MESSAGE_AUDIO", "MESSAGE_VOICE_NOTE"},
@@ -2841,6 +2848,7 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
       {"MESSAGE_GEOLIVE", "MESSAGE_LIVE_LOCATION"},
       {"MESSAGE_GIF", "MESSAGE_ANIMATION"},
       {"MESSAGE_GIFTCODE", "MESSAGE_GIFTCODE"},
+      {"MESSAGE_GIFT_THEME", "MESSAGE_CHAT_CHANGE_THEME"},
       {"MESSAGE_GIVEAWAY", "MESSAGE_GIVEAWAY"},
       {"MESSAGE_GIVEAWAY_STARS", "MESSAGE_GIVEAWAY_STARS"},
       {"MESSAGE_INVOICE", "MESSAGE_INVOICE"},
@@ -2852,18 +2860,26 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
       {"MESSAGE_PHOTO_SECRET", "MESSAGE_SECRET_PHOTO"},
       {"MESSAGE_PLAYLIST", "MESSAGE_AUDIOS"},
       {"MESSAGE_POLL", "MESSAGE_POLL"},
+      {"MESSAGE_PROXIMITY", "MESSAGE_PROXIMITY"},
       {"MESSAGE_QUIZ", "MESSAGE_QUIZ"},
       {"MESSAGE_RECURRING_PAY", "MESSAGE_RECURRING_PAYMENT"},
       {"MESSAGE_ROUND", "MESSAGE_VIDEO_NOTE"},
       {"MESSAGE_SAME_WALLPAPER", "MESSAGE_SAME_WALLPAPER"},
       {"MESSAGE_SCREENSHOT", "MESSAGE_SCREENSHOT_TAKEN"},
       {"MESSAGE_STARGIFT", "MESSAGE_STARGIFT"},
+      {"MESSAGE_STARGIFT_PREPAID_UPGRADE", "MESSAGE_STARGIFT_PREPAID_UPGRADE"},
+      {"MESSAGE_STARGIFT_UNPACK_UPGRADE", "MESSAGE_STARGIFT_UNPACK_UPGRADE"},
       {"MESSAGE_STARGIFT_UPGRADE", "MESSAGE_STARGIFT_UPGRADE"},
       {"MESSAGE_STICKER", "MESSAGE_STICKER"},
       {"MESSAGE_STORY", "MESSAGE_STORY"},
-      {"MESSAGE_SUGGEST_PHOTO", "MESSAGE_SUGGEST_PHOTO"},
+      {"MESSAGE_STORY_MENTION", "MESSAGE_STORY_MENTION"},
+      {"MESSAGE_SUGGEST_BIRTHDAY", "MESSAGE_SUGGEST_BIRTHDAY"},
+      {"MESSAGE_SUGGEST_USERPIC", "MESSAGE_SUGGEST_PHOTO"},
       {"MESSAGE_TEXT", "MESSAGE_TEXT"},
       {"MESSAGE_THEME", "MESSAGE_CHAT_CHANGE_THEME"},
+      {"MESSAGE_TODO", "MESSAGE_TODO"},
+      {"MESSAGE_TODO_APPEND", "MESSAGE_TODO_APPEND"},
+      {"MESSAGE_TODO_DONE", "MESSAGE_TODO_DONE"},
       {"MESSAGE_UNIQUE_STARGIFT", "MESSAGE_STARGIFT_TRANSFER"},
       {"MESSAGE_VIDEO", "MESSAGE_VIDEO"},
       {"MESSAGE_VIDEOS", "MESSAGE_VIDEOS"},
@@ -2889,6 +2905,7 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
       {"PINNED_STICKER", "PINNED_MESSAGE_STICKER"},
       {"PINNED_STORY", "PINNED_MESSAGE_STORY"},
       {"PINNED_TEXT", "PINNED_MESSAGE_TEXT"},
+      {"PINNED_TODO", "PINNED_MESSAGE_TODO"},
       {"PINNED_VIDEO", "PINNED_MESSAGE_VIDEO"}};
   auto it = loc_keys.find(loc_key);
   if (it != loc_keys.end()) {
@@ -2900,22 +2917,20 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
 void NotificationManager::add_push_notification_user(
     UserId sender_user_id, int64 sender_access_hash, const string &sender_name,
     telegram_api::object_ptr<telegram_api::UserProfilePhoto> &&sender_photo) {
-  int32 flags = USER_FLAG_IS_INACCESSIBLE;
+  int32 flags = 0;
   if (sender_access_hash != -1) {
     // set phone number flag to show that this is a full access hash
-    flags |= USER_FLAG_HAS_ACCESS_HASH | USER_FLAG_HAS_PHONE_NUMBER;
+    flags |= telegram_api::user::ACCESS_HASH_MASK | telegram_api::user::PHONE_MASK;
   } else {
     sender_access_hash = 0;
   }
   auto user_name = sender_user_id.get() == 136817688 ? "Channel" : sender_name;
   auto user = telegram_api::make_object<telegram_api::user>(
-      flags, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/,
-      false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/,
-      false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/,
-      false /*ignored*/, 0, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/,
-      false /*ignored*/, false /*ignored*/, false /*ignored*/, sender_user_id.get(), sender_access_hash, user_name,
-      string(), string(), string(), std::move(sender_photo), nullptr, 0, Auto(), string(), string(), nullptr,
-      vector<telegram_api::object_ptr<telegram_api::username>>(), 0, nullptr, nullptr, 0, 0);
+      flags, false, false, false, false, false, false, false, false, false, true /*min*/, false, false, false, false,
+      false, false, false, false, 0, false, false, false, false, false, false, false, false, sender_user_id.get(),
+      sender_access_hash, user_name, string(), string(), string(), std::move(sender_photo), nullptr, 0, Auto(),
+      string(), string(), nullptr, vector<telegram_api::object_ptr<telegram_api::username>>(), 0, nullptr, nullptr, 0,
+      0, 0);
   td_->user_manager_->on_get_user(std::move(user), "add_push_notification_user");
 }
 
@@ -3345,9 +3360,19 @@ Status NotificationManager::process_push_notification_payload(string payload, bo
     return Status::Error(406, "Phone call notification is not supported");
   }
 
+  if (begins_with(loc_key, "CONF_CALL_") || begins_with(loc_key, "CONF_VIDEOCALL_")) {
+    // TODO CONF_CALL_REQUEST/CONF_CALL_MISSED/CONF_VIDEOCALL_REQUEST/CONF_VIDEOCALL_MISSED notifications
+    return Status::Error(406, "Group call notification is not supported");
+  }
+
   if (begins_with(loc_key, "REACT_") || loc_key == "READ_REACTION") {
     // TODO REACT_* notifications
     return Status::Error(406, "Reaction notifications are unsupported");
+  }
+
+  if (begins_with(loc_key, "STORY_")) {
+    // TODO STORY_NOTEXT, STORY_HIDDEN_AUTHOR notifications
+    return Status::Error(406, "Story notifications are unsupported");
   }
 
   loc_key = convert_loc_key(loc_key);
@@ -3672,7 +3697,7 @@ void NotificationManager::add_message_push_notification(DialogId dialog_id, Mess
     if (r_info.error().code() == 406) {
       promise.set_error(r_info.move_as_error());
     } else {
-      promise.set_error(Status::Error(200, "Immediate success"));
+      promise.set_error(200, "Immediate success");
     }
     return;
   }
@@ -3686,13 +3711,13 @@ void NotificationManager::add_message_push_notification(DialogId dialog_id, Mess
     // main problem: there is no message_id yet
     // also don't forget to delete newSecretChat notification
     CHECK(log_event_id == 0);
-    return promise.set_error(Status::Error(406, "Secret chat push notifications are unsupported"));
+    return promise.set_error(406, "Secret chat push notifications are unsupported");
   }
   CHECK(random_id == 0);
 
   if (is_disabled() || max_notification_group_count_ == 0) {
     CHECK(log_event_id == 0);
-    return promise.set_error(Status::Error(200, "Immediate success"));
+    return promise.set_error(200, "Immediate success");
   }
 
   if (!notification_id.is_valid()) {
@@ -3834,14 +3859,14 @@ void NotificationManager::edit_message_push_notification(DialogId dialog_id, Mes
                                                          uint64 log_event_id, Promise<Unit> promise) {
   if (is_disabled() || max_notification_group_count_ == 0) {
     CHECK(log_event_id == 0);
-    return promise.set_error(Status::Error(200, "Immediate success"));
+    return promise.set_error(200, "Immediate success");
   }
 
   auto it = temporary_notifications_.find({dialog_id, message_id});
   if (it == temporary_notifications_.end()) {
     VLOG(notifications) << "Ignore edit of message push notification for " << message_id << " in " << dialog_id
                         << " edited at " << edit_date;
-    return promise.set_error(Status::Error(200, "Immediate success"));
+    return promise.set_error(200, "Immediate success");
   }
 
   auto group_id = it->second.group_id;

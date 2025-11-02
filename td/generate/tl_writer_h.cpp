@@ -171,7 +171,7 @@ std::string TD_TL_writer_h::gen_function_vars(const tl::tl_combinator *t,
     if (!vars[i].is_type) {
       assert(vars[i].parameter_num == -1);
       assert(vars[i].function_arg_num == -1);
-      assert(vars[i].is_stored == false);
+      assert(!vars[i].is_stored);
       res += "  mutable " + gen_class_name("#") + " " + gen_var_name(vars[i]) + ";\n";
     }
   }
@@ -183,19 +183,25 @@ bool TD_TL_writer_h::need_arg_mask(const tl::arg &a, bool can_be_stored) const {
     return false;
   }
 
-  if (can_be_stored) {
-    return true;
-  }
-
   if (a.type->get_type() != tl::NODE_TYPE_TYPE) {
     return true;
   }
   const tl::tl_tree_type *tree_type = static_cast<tl::tl_tree_type *>(a.type);
   const std::string &name = tree_type->type->name;
 
-  if (!is_built_in_simple_type(name) || name == "True") {
+  if (name == "True") {
     return false;
   }
+  if (can_be_stored) {
+    return true;
+  }
+  if (a.name == "albums") {
+    return true;
+  }
+  if (!is_built_in_simple_type(name)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -244,8 +250,8 @@ std::string TD_TL_writer_h::gen_field_fetch(int field_num, const tl::arg &a, std
   return "";
 }
 
-std::string TD_TL_writer_h::gen_field_store(const tl::arg &a, std::vector<tl::var_description> &vars, bool flat,
-                                            int storer_type) const {
+std::string TD_TL_writer_h::gen_field_store(const tl::arg &a, const std::vector<tl::arg> &args,
+                                            std::vector<tl::var_description> &vars, bool flat, int storer_type) const {
   return "";
 }
 

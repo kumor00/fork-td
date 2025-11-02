@@ -75,6 +75,8 @@ class StickersManager final : public Actor {
 
   StickerFormat get_sticker_format(FileId file_id) const;
 
+  int64 get_sticker_id(FileId sticker_id) const;
+
   bool is_premium_custom_emoji(CustomEmojiId custom_emoji_id, bool default_result) const;
 
   bool have_sticker(StickerSetId sticker_set_id, int64 sticker_id);
@@ -106,6 +108,8 @@ class StickersManager final : public Actor {
 
   td_api::object_ptr<td_api::sticker> get_premium_gift_sticker_object(int32 month_count, int64 star_count);
 
+  td_api::object_ptr<td_api::sticker> get_ton_gift_sticker_object(int64 ton_count);
+
   td_api::object_ptr<td_api::animatedEmoji> get_animated_emoji_object(const string &emoji,
                                                                       CustomEmojiId custom_emoji_id);
 
@@ -119,6 +123,14 @@ class StickersManager final : public Actor {
   void register_premium_gift(int32 months, int64 star_count, MessageFullId message_full_id, const char *source);
 
   void unregister_premium_gift(int32 months, int64 star_count, MessageFullId message_full_id, const char *source);
+
+  void load_ton_gift_sticker_set(Promise<Unit> &&promise);
+
+  void load_ton_gift_sticker(int64 ton_count, Promise<td_api::object_ptr<td_api::sticker>> &&promise);
+
+  void register_ton_gift(int64 ton_count, MessageFullId message_full_id, const char *source);
+
+  void unregister_ton_gift(int64 ton_count, MessageFullId message_full_id, const char *source);
 
   void register_dice(const string &emoji, int32 value, MessageFullId message_full_id,
                      QuickReplyMessageFullId quick_reply_message_full_id, const char *source);
@@ -169,8 +181,8 @@ class StickersManager final : public Actor {
   Status on_animated_emoji_message_clicked(string &&emoji, MessageFullId message_full_id, string data);
 
   void create_sticker(FileId file_id, FileId premium_animation_file_id, string minithumbnail, PhotoSize thumbnail,
-                      Dimensions dimensions, tl_object_ptr<telegram_api::documentAttributeSticker> sticker,
-                      tl_object_ptr<telegram_api::documentAttributeCustomEmoji> custom_emoji,
+                      Dimensions dimensions, telegram_api::object_ptr<telegram_api::documentAttributeSticker> sticker,
+                      telegram_api::object_ptr<telegram_api::documentAttributeCustomEmoji> custom_emoji,
                       StickerFormat sticker_format, MultiPromiseActor *load_data_multipromise_ptr);
 
   bool has_secret_input_media(FileId sticker_file_id) const;
@@ -464,9 +476,9 @@ class StickersManager final : public Actor {
   static constexpr int32 MAX_FEATURED_STICKER_SET_VIEW_DELAY = 5;
   static constexpr int32 OLD_FEATURED_STICKER_SET_SLICE_SIZE = 20;
 
-  static constexpr int32 MAX_FOUND_STICKERS = 100;                 // server side limit
-  static constexpr size_t MAX_STICKER_SET_TITLE_LENGTH = 64;       // server side limit
-  static constexpr size_t MAX_STICKER_SET_SHORT_NAME_LENGTH = 64;  // server side limit
+  static constexpr int32 MAX_FOUND_STICKERS = 100;                 // server-side limit
+  static constexpr size_t MAX_STICKER_SET_TITLE_LENGTH = 64;       // server-side limit
+  static constexpr size_t MAX_STICKER_SET_SHORT_NAME_LENGTH = 64;  // server-side limit
   static constexpr size_t MAX_GET_CUSTOM_EMOJI_STICKERS = 200;     // server-side limit
 
   static constexpr int32 EMOJI_KEYWORDS_UPDATE_DELAY = 3600;
@@ -607,7 +619,7 @@ class StickersManager final : public Actor {
 
   class UploadStickerFileCallback;
 
-  int64 get_sticker_id(FileId sticker_id) const;
+  static int32 get_ton_count_num(int64 ton_count);
 
   CustomEmojiId get_custom_emoji_id(FileId sticker_id) const;
 
@@ -866,14 +878,24 @@ class StickersManager final : public Actor {
 
   const StickerSet *get_premium_gift_sticker_set();
 
+  const StickerSet *get_ton_gift_sticker_set();
+
   void return_premium_gift_sticker(int32 month_count, int64 star_count,
                                    Promise<td_api::object_ptr<td_api::sticker>> &&promise);
 
+  void return_ton_gift_sticker(int64 ton_count, Promise<td_api::object_ptr<td_api::sticker>> &&promise);
+
   static FileId get_premium_gift_option_sticker_id(const StickerSet *sticker_set, int32 month_count);
+
+  static FileId get_ton_gift_sticker_id(const StickerSet *sticker_set, int32 num);
 
   FileId get_premium_gift_option_sticker_id(int32 month_count);
 
+  FileId get_ton_gift_sticker_id(int32 num);
+
   void try_update_premium_gift_messages();
+
+  void try_update_ton_gift_messages();
 
   const StickerSet *get_animated_emoji_sticker_set();
 
@@ -1116,6 +1138,7 @@ class StickersManager final : public Actor {
   vector<Promise<Unit>> pending_get_default_statuses_queries_;
   vector<Promise<Unit>> pending_get_default_channel_statuses_queries_;
   vector<Promise<Unit>> pending_get_default_topic_icons_queries_;
+  vector<Promise<Unit>> pending_get_ton_gift_sticker_queries_;
 
   double next_click_animated_emoji_message_time_ = 0;
   double next_update_animated_emoji_clicked_time_ = 0;
@@ -1149,6 +1172,7 @@ class StickersManager final : public Actor {
     FileId sticker_id_;
   };
   FlatHashMap<int32, unique_ptr<GiftPremiumMessages>> premium_gift_messages_;
+  FlatHashMap<int32, unique_ptr<GiftPremiumMessages>> ton_gift_messages_;
 
   FlatHashMap<string, WaitFreeHashSet<MessageFullId, MessageFullIdHash>> dice_messages_;
   FlatHashMap<string, WaitFreeHashSet<QuickReplyMessageFullId, QuickReplyMessageFullIdHash>> dice_quick_reply_messages_;

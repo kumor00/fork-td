@@ -11,6 +11,7 @@
 #include "td/telegram/MessageId.h"
 #include "td/telegram/Td.h"
 
+#include "td/utils/algorithm.h"
 #include "td/utils/logging.h"
 #include "td/utils/misc.h"
 #include "td/utils/Slice.h"
@@ -40,18 +41,30 @@ StarGiftId::StarGiftId(DialogId dialog_id, int64 saved_id) {
   saved_id_ = saved_id;
 }
 
+StarGiftId StarGiftId::from_slug(const string &slug) {
+  StarGiftId result;
+  result.type_ = Type::Slug;
+  result.slug_ = slug;
+  return result;
+}
+
 StarGiftId::StarGiftId(const string &star_gift_id) {
   if (star_gift_id.empty()) {
     return;
   }
-  auto underscore_pos = star_gift_id.find('_');
-  if (underscore_pos == string::npos) {
-    type_ = Type::ForUser;
-    server_message_id_ = ServerMessageId(to_integer<int32>(star_gift_id));
+  if (star_gift_id[0] == '@') {
+    type_ = Type::Slug;
+    slug_ = star_gift_id.substr(1);
   } else {
-    type_ = Type::ForDialog;
-    dialog_id_ = DialogId(to_integer<int64>(star_gift_id));
-    saved_id_ = to_integer<int64>(Slice(star_gift_id).substr(underscore_pos + 1));
+    auto underscore_pos = star_gift_id.find('_');
+    if (underscore_pos == string::npos) {
+      type_ = Type::ForUser;
+      server_message_id_ = ServerMessageId(to_integer<int32>(star_gift_id));
+    } else {
+      type_ = Type::ForDialog;
+      dialog_id_ = DialogId(to_integer<int64>(star_gift_id));
+      saved_id_ = to_integer<int64>(Slice(star_gift_id).substr(underscore_pos + 1));
+    }
   }
   if (get_star_gift_id() != star_gift_id) {
     *this = {};
@@ -71,10 +84,18 @@ telegram_api::object_ptr<telegram_api::InputSavedStarGift> StarGiftId::get_input
       }
       return telegram_api::make_object<telegram_api::inputSavedStarGiftChat>(std::move(input_peer), saved_id_);
     }
+    case Type::Slug:
+      return telegram_api::make_object<telegram_api::inputSavedStarGiftSlug>(slug_);
     default:
       UNREACHABLE();
       return nullptr;
   }
+}
+
+vector<telegram_api::object_ptr<telegram_api::InputSavedStarGift>> StarGiftId::get_input_saved_star_gifts(
+    Td *td, const vector<StarGiftId> &star_gift_ids) {
+  return transform(star_gift_ids,
+                   [td](const StarGiftId &star_gift_id) { return star_gift_id.get_input_saved_star_gift(td); });
 }
 
 string StarGiftId::get_star_gift_id() const {
@@ -85,6 +106,8 @@ string StarGiftId::get_star_gift_id() const {
       return PSTRING() << server_message_id_.get();
     case Type::ForDialog:
       return PSTRING() << dialog_id_.get() << '_' << saved_id_;
+    case Type::Slug:
+      return PSTRING() << '@' << slug_;
     default:
       UNREACHABLE();
       return string();
@@ -99,6 +122,8 @@ DialogId StarGiftId::get_dialog_id(const Td *td) const {
       return td->dialog_manager_->get_my_dialog_id();
     case Type::ForDialog:
       return dialog_id_;
+    case Type::Slug:
+      return DialogId();
     default:
       UNREACHABLE();
       return DialogId();
@@ -107,7 +132,7 @@ DialogId StarGiftId::get_dialog_id(const Td *td) const {
 
 bool operator==(const StarGiftId &lhs, const StarGiftId &rhs) {
   return lhs.type_ == rhs.type_ && lhs.server_message_id_ == rhs.server_message_id_ &&
-         lhs.dialog_id_ == rhs.dialog_id_ && lhs.saved_id_ == rhs.saved_id_;
+         lhs.dialog_id_ == rhs.dialog_id_ && lhs.saved_id_ == rhs.saved_id_ && lhs.slug_ == rhs.slug_;
 }
 
 StringBuilder &operator<<(StringBuilder &string_builder, const StarGiftId &star_gift_id) {
@@ -118,6 +143,8 @@ StringBuilder &operator<<(StringBuilder &string_builder, const StarGiftId &star_
       return string_builder << "user gift from " << MessageId(star_gift_id.server_message_id_);
     case StarGiftId::Type::ForDialog:
       return string_builder << star_gift_id.dialog_id_ << " gift " << star_gift_id.saved_id_;
+    case StarGiftId::Type::Slug:
+      return string_builder << "gift " << star_gift_id.slug_;
     default:
       UNREACHABLE();
       return string_builder;

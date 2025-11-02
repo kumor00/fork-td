@@ -6,6 +6,7 @@
 //
 #include "td/telegram/AccountManager.h"
 
+#include "td/telegram/AgeVerificationParameters.hpp"
 #include "td/telegram/AuthManager.h"
 #include "td/telegram/DeviceTokenManager.h"
 #include "td/telegram/Global.h"
@@ -13,6 +14,7 @@
 #include "td/telegram/logevent/LogEvent.h"
 #include "td/telegram/logevent/LogEventHelper.h"
 #include "td/telegram/net/NetQueryCreator.h"
+#include "td/telegram/OptionManager.h"
 #include "td/telegram/Td.h"
 #include "td/telegram/TdDb.h"
 #include "td/telegram/telegram_api.h"
@@ -387,13 +389,10 @@ class ChangeAuthorizationSettingsQuery final : public Td::ResultHandler {
     if (set_call_requests_disabled) {
       flags |= telegram_api::account_changeAuthorizationSettings::CALL_REQUESTS_DISABLED_MASK;
     }
-    if (confirm) {
-      flags |= telegram_api::account_changeAuthorizationSettings::CONFIRMED_MASK;
-    }
-    send_query(G()->net_query_creator().create(
-        telegram_api::account_changeAuthorizationSettings(flags, false /*ignored*/, hash, encrypted_requests_disabled,
-                                                          call_requests_disabled),
-        {{"me"}}));
+    send_query(
+        G()->net_query_creator().create(telegram_api::account_changeAuthorizationSettings(
+                                            flags, confirm, hash, encrypted_requests_disabled, call_requests_disabled),
+                                        {{"me"}}));
   }
 
   void on_result(BufferSlice packet) final {
@@ -772,6 +771,13 @@ void AccountManager::start_up() {
       get_active_sessions(Auto());
     }
   }
+  auto age_verification_parameters_log_event_string =
+      G()->td_db()->get_binlog_pmc()->get(get_age_verification_parameters_key());
+  if (!age_verification_parameters_log_event_string.empty()) {
+    log_event_parse(age_verification_parameters_, age_verification_parameters_log_event_string).ensure();
+    CHECK(age_verification_parameters_.need_verification());
+    send_update_age_verification_parameters();
+  }
 }
 
 void AccountManager::timeout_expired() {
@@ -783,6 +789,34 @@ void AccountManager::timeout_expired() {
 
 void AccountManager::tear_down() {
   parent_.reset();
+}
+
+string AccountManager::get_age_verification_parameters_key() {
+  return "age_verification";
+}
+
+void AccountManager::on_update_age_verification_parameters(AgeVerificationParameters &&age_verification_parameters) {
+  if (age_verification_parameters == age_verification_parameters_) {
+    return;
+  }
+  age_verification_parameters_ = std::move(age_verification_parameters);
+  if (age_verification_parameters_.need_verification()) {
+    G()->td_db()->get_binlog_pmc()->set(get_age_verification_parameters_key(),
+                                        log_event_store(age_verification_parameters_).as_slice().str());
+  } else {
+    G()->td_db()->get_binlog_pmc()->erase(get_age_verification_parameters_key());
+  }
+  send_update_age_verification_parameters();
+}
+
+td_api::object_ptr<td_api::updateAgeVerificationParameters> AccountManager::get_update_age_verification_parameters()
+    const {
+  return td_api::make_object<td_api::updateAgeVerificationParameters>(
+      age_verification_parameters_.get_age_verification_parameters_object());
+}
+
+void AccountManager::send_update_age_verification_parameters() const {
+  send_closure(G()->td(), &Td::send_update, get_update_age_verification_parameters());
 }
 
 class AccountManager::SetDefaultHistoryTtlOnServerLogEvent {
@@ -862,11 +896,11 @@ void AccountManager::confirm_qr_code_authentication(const string &link,
                                                     Promise<td_api::object_ptr<td_api::session>> &&promise) {
   Slice prefix("tg://login?token=");
   if (!begins_with(to_lower(link), prefix)) {
-    return promise.set_error(Status::Error(400, "AUTH_TOKEN_INVALID"));
+    return promise.set_error(400, "AUTH_TOKEN_INVALID");
   }
   auto r_token = base64url_decode(Slice(link).substr(prefix.size()));
   if (r_token.is_error()) {
-    return promise.set_error(Status::Error(400, "AUTH_TOKEN_INVALID"));
+    return promise.set_error(400, "AUTH_TOKEN_INVALID");
   }
   td_->create_handler<AcceptLoginTokenQuery>(std::move(promise))->send(r_token.ok());
 }
@@ -1009,6 +1043,9 @@ void AccountManager::confirm_session(int64 session_id, Promise<Unit> &&promise) 
 }
 
 void AccountManager::toggle_session_can_accept_calls(int64 session_id, bool can_accept_calls, Promise<Unit> &&promise) {
+  if (session_id == 0) {
+    td_->option_manager_->set_option_boolean("can_accept_calls", can_accept_calls);
+  }
   change_authorization_settings_on_server(session_id, false, false, true, !can_accept_calls, false, 0,
                                           std::move(promise));
 }
@@ -1341,6 +1378,9 @@ void AccountManager::on_binlog_events(vector<BinlogEvent> &&events) {
 void AccountManager::get_current_state(vector<td_api::object_ptr<td_api::Update>> &updates) const {
   if (unconfirmed_authorizations_ != nullptr) {
     updates.push_back(get_update_unconfirmed_session());
+  }
+  if (age_verification_parameters_.need_verification()) {
+    updates.push_back(get_update_age_verification_parameters());
   }
 }
 

@@ -37,6 +37,7 @@ class RepliedMessageInfo {
   MessageOrigin origin_;                // for replies in other chats
   unique_ptr<MessageContent> content_;  // for replies in other chats
   MessageQuote quote_;
+  int32 todo_item_id_ = 0;
 
   friend bool operator==(const RepliedMessageInfo &lhs, const RepliedMessageInfo &rhs);
 
@@ -72,7 +73,7 @@ class RepliedMessageInfo {
     return origin_date_ != 0;
   }
 
-  bool need_reget() const;
+  bool need_reget(const Td *td) const;
 
   static bool need_reply_changed_warning(
       const Td *td, const RepliedMessageInfo &old_info, const RepliedMessageInfo &new_info,
@@ -90,7 +91,7 @@ class RepliedMessageInfo {
   td_api::object_ptr<td_api::messageReplyToMessage> get_message_reply_to_message_object(Td *td, DialogId dialog_id,
                                                                                         MessageId message_id) const;
 
-  MessageInputReplyTo get_input_reply_to() const;
+  MessageInputReplyTo get_message_input_reply_to() const;
 
   void set_message_id(MessageId new_message_id) {
     CHECK(message_id_.is_valid() || message_id_.is_valid_scheduled());

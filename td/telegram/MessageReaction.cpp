@@ -61,18 +61,10 @@ class SendReactionQuery final : public Td::ResultHandler {
     int32 flags = 0;
     if (!reaction_types.empty()) {
       flags |= telegram_api::messages_sendReaction::REACTION_MASK;
-
-      if (is_big) {
-        flags |= telegram_api::messages_sendReaction::BIG_MASK;
-      }
-
-      if (add_to_recent) {
-        flags |= telegram_api::messages_sendReaction::ADD_TO_RECENT_MASK;
-      }
     }
 
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_sendReaction(flags, false /*ignored*/, false /*ignored*/, std::move(input_peer),
+        telegram_api::messages_sendReaction(flags, is_big, add_to_recent, std::move(input_peer),
                                             message_full_id.get_message_id().get_server_message_id().get(),
                                             ReactionType::get_input_reactions(reaction_types)),
         {{dialog_id_}, {message_full_id}}));
@@ -326,7 +318,7 @@ class ReportReactionQuery final : public Td::ResultHandler {
 
     auto chooser_input_peer = td_->dialog_manager_->get_input_peer(chooser_dialog_id, AccessRights::Know);
     if (chooser_input_peer == nullptr) {
-      return promise_.set_error(Status::Error(400, "Reaction sender is not accessible"));
+      return promise_.set_error(400, "Reaction sender is not accessible");
     }
 
     send_query(G()->net_query_creator().create(telegram_api::messages_reportReaction(
@@ -642,7 +634,7 @@ unique_ptr<MessageReactions> MessageReactions::get_message_reactions(
   }
   bool was_me = false;
   for (auto &top_reactor : reactions->top_reactors_) {
-    MessageReactor reactor(std::move(top_reactor));
+    MessageReactor reactor(td, std::move(top_reactor));
     if (!reactor.is_valid() || (reactions->min_ && reactor.is_me())) {
       LOG(ERROR) << "Receive " << reactor;
       continue;
@@ -1036,6 +1028,9 @@ void MessageReactions::add_min_channels(Td *td) const {
       td->chat_manager_->add_min_channel(recent_chooser_min_channel.first, recent_chooser_min_channel.second);
     }
   }
+  for (const auto &reactor : top_reactors_) {
+    reactor.add_min_channel(td);
+  }
 }
 
 void MessageReactions::add_dependencies(Dependencies &dependencies) const {
@@ -1120,7 +1115,7 @@ bool MessageReactions::set_paid_message_reaction_type(Td *td, MessageFullId mess
     promise.set_value(Unit());
     return true;
   }
-  promise.set_error(Status::Error(400, "Message has no paid reaction"));
+  promise.set_error(400, "Message has no paid reaction");
   return false;
 }
 
@@ -1153,11 +1148,11 @@ void send_message_reaction(Td *td, MessageFullId message_full_id, vector<Reactio
 void set_message_reactions(Td *td, MessageFullId message_full_id, vector<ReactionType> reaction_types, bool is_big,
                            Promise<Unit> &&promise) {
   if (!td->messages_manager_->have_message_force(message_full_id, "set_message_reactions")) {
-    return promise.set_error(Status::Error(400, "Message not found"));
+    return promise.set_error(400, "Message not found");
   }
   for (const auto &reaction_type : reaction_types) {
     if (reaction_type.is_empty() || reaction_type.is_paid_reaction()) {
-      return promise.set_error(Status::Error(400, "Invalid reaction type specified"));
+      return promise.set_error(400, "Invalid reaction type specified");
     }
   }
   send_message_reaction(td, message_full_id, std::move(reaction_types), is_big, false, std::move(promise));
@@ -1170,22 +1165,21 @@ void reload_paid_reaction_privacy(Td *td) {
 void get_message_added_reactions(Td *td, MessageFullId message_full_id, ReactionType reaction_type, string offset,
                                  int32 limit, Promise<td_api::object_ptr<td_api::addedReactions>> &&promise) {
   if (!td->messages_manager_->have_message_force(message_full_id, "get_message_added_reactions")) {
-    return promise.set_error(Status::Error(400, "Message not found"));
+    return promise.set_error(400, "Message not found");
   }
   if (reaction_type.is_paid_reaction()) {
-    return promise.set_error(Status::Error(400, "Can't use the method for paid reaction"));
+    return promise.set_error(400, "Can't use the method for paid reaction");
   }
 
   auto message_id = message_full_id.get_message_id();
-  if (message_full_id.get_dialog_id().get_type() == DialogType::SecretChat || !message_id.is_valid() ||
-      !message_id.is_server()) {
+  if (message_full_id.get_dialog_id().get_type() == DialogType::SecretChat || !message_id.is_server()) {
     return promise.set_value(td_api::make_object<td_api::addedReactions>(0, Auto(), string()));
   }
 
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
-  static constexpr int32 MAX_GET_ADDED_REACTIONS = 100;  // server side limit
+  static constexpr int32 MAX_GET_ADDED_REACTIONS = 100;  // server-side limit
   if (limit > MAX_GET_ADDED_REACTIONS) {
     limit = MAX_GET_ADDED_REACTIONS;
   }
@@ -1201,18 +1195,18 @@ void report_message_reactions(Td *td, MessageFullId message_full_id, DialogId ch
                                                                        "report_message_reactions"));
 
   if (!td->messages_manager_->have_message_force(message_full_id, "report_message_reactions")) {
-    return promise.set_error(Status::Error(400, "Message not found"));
+    return promise.set_error(400, "Message not found");
   }
   auto message_id = message_full_id.get_message_id();
   if (message_id.is_valid_scheduled()) {
-    return promise.set_error(Status::Error(400, "Can't report reactions on scheduled messages"));
+    return promise.set_error(400, "Can't report reactions on scheduled messages");
   }
   if (!message_id.is_server()) {
-    return promise.set_error(Status::Error(400, "Message reactions can't be reported"));
+    return promise.set_error(400, "Message reactions can't be reported");
   }
 
   if (!td->dialog_manager_->have_input_peer(chooser_dialog_id, false, AccessRights::Know)) {
-    return promise.set_error(Status::Error(400, "Reaction sender not found"));
+    return promise.set_error(400, "Reaction sender not found");
   }
 
   td->create_handler<ReportReactionQuery>(std::move(promise))->send(dialog_id, message_id, chooser_dialog_id);

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "td/telegram/DialogId.h"
+#include "td/telegram/Dimensions.h"
 #include "td/telegram/Document.h"
 #include "td/telegram/EncryptedFile.h"
 #include "td/telegram/files/FileId.h"
@@ -48,7 +49,7 @@ class DocumentsManager {
     tl_object_ptr<telegram_api::WebDocument> web_document;
     PhotoSize thumbnail;
 
-    vector<tl_object_ptr<telegram_api::DocumentAttribute>> attributes;
+    vector<telegram_api::object_ptr<telegram_api::DocumentAttribute>> attributes;
 
     RemoteDocument(tl_object_ptr<telegram_api::document> &&server_document)
         : document(std::move(server_document))
@@ -60,7 +61,7 @@ class DocumentsManager {
     }
 
     RemoteDocument(tl_object_ptr<telegram_api::WebDocument> &&web_document, PhotoSize thumbnail,
-                   vector<tl_object_ptr<telegram_api::DocumentAttribute>> &&attributes)
+                   vector<telegram_api::object_ptr<telegram_api::DocumentAttribute>> &&attributes)
         : document(nullptr)
         , secret_file(nullptr)
         , secret_document(nullptr)
@@ -71,7 +72,7 @@ class DocumentsManager {
 
     RemoteDocument(unique_ptr<EncryptedFile> &&secret_file,
                    tl_object_ptr<secret_api::decryptedMessageMediaDocument> &&secret_document,
-                   vector<tl_object_ptr<telegram_api::DocumentAttribute>> &&attributes)
+                   vector<telegram_api::object_ptr<telegram_api::DocumentAttribute>> &&attributes)
         : document(nullptr)
         , secret_file(std::move(secret_file))
         , secret_document(std::move(secret_document))
@@ -83,6 +84,9 @@ class DocumentsManager {
 
   tl_object_ptr<td_api::document> get_document_object(FileId file_id, PhotoFormat thumbnail_format) const;
 
+  td_api::object_ptr<td_api::videoStoryboard> get_video_storyboard_object(FileId file_id,
+                                                                          const vector<FileId> &map_file_ids) const;
+
   enum class Subtype : int32 { Background, Pattern, Ringtone, Story, Other };
 
   Document on_get_document(RemoteDocument remote_document, DialogId owner_dialog_id, bool is_self_destructing,
@@ -91,7 +95,7 @@ class DocumentsManager {
                            Subtype document_subtype = Subtype::Other);
 
   void create_document(FileId file_id, string minithumbnail, PhotoSize thumbnail, string file_name, string mime_type,
-                       bool replace);
+                       Dimensions dimensions, bool replace);
 
   SecretInputMedia get_secret_input_media(FileId document_file_id,
                                           telegram_api::object_ptr<telegram_api::InputEncryptedFile> input_file,
@@ -128,6 +132,7 @@ class DocumentsManager {
     string mime_type;
     string minithumbnail;
     PhotoSize thumbnail;
+    Dimensions dimensions;
     FileId file_id;
   };
 

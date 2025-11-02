@@ -28,6 +28,7 @@
 #include "td/telegram/QuickReplyManager.h"
 #include "td/telegram/ReactionManager.h"
 #include "td/telegram/ReactionType.hpp"
+#include "td/telegram/StoryAlbum.h"
 #include "td/telegram/StoryContent.h"
 #include "td/telegram/StoryContentType.h"
 #include "td/telegram/StoryForwardInfo.h"
@@ -38,6 +39,7 @@
 #include "td/telegram/Td.h"
 #include "td/telegram/TdDb.h"
 #include "td/telegram/telegram_api.h"
+#include "td/telegram/TopDialogManager.h"
 #include "td/telegram/UpdatesManager.h"
 #include "td/telegram/UserManager.h"
 #include "td/telegram/WebPagesManager.h"
@@ -59,6 +61,7 @@
 #include "td/utils/Time.h"
 #include "td/utils/tl_helpers.h"
 
+#include <algorithm>
 #include <limits>
 
 namespace td {
@@ -76,14 +79,8 @@ class GetAllStoriesQuery final : public Td::ResultHandler {
     if (!state.empty()) {
       flags |= telegram_api::stories_getAllStories::STATE_MASK;
     }
-    if (is_next) {
-      flags |= telegram_api::stories_getAllStories::NEXT_MASK;
-    }
-    if (story_list_id == StoryListId::archive()) {
-      flags |= telegram_api::stories_getAllStories::HIDDEN_MASK;
-    }
-    send_query(G()->net_query_creator().create(
-        telegram_api::stories_getAllStories(flags, false /*ignored*/, false /*ignored*/, state)));
+    bool hidden = story_list_id == StoryListId::archive();
+    send_query(G()->net_query_creator().create(telegram_api::stories_getAllStories(flags, is_next, hidden, state)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -273,15 +270,13 @@ class SendStoryReactionQuery final : public Td::ResultHandler {
       return on_error(Status::Error(400, "Can't access the chat"));
     }
     CHECK(!reaction_type.is_paid_reaction());
-
-    int32 flags = 0;
-    if (!reaction_type.is_empty() && add_to_recent) {
-      flags |= telegram_api::stories_sendReaction::ADD_TO_RECENT_MASK;
+    if (reaction_type.is_empty()) {
+      add_to_recent = false;
     }
 
     send_query(G()->net_query_creator().create(
-        telegram_api::stories_sendReaction(flags, false /*ignored*/, std::move(input_peer),
-                                           story_full_id.get_story_id().get(), reaction_type.get_input_reaction()),
+        telegram_api::stories_sendReaction(0, add_to_recent, std::move(input_peer), story_full_id.get_story_id().get(),
+                                           reaction_type.get_input_reaction()),
         {{story_full_id}, {"view_story"}}));
   }
 
@@ -326,17 +321,8 @@ class GetStoryViewsListQuery final : public Td::ResultHandler {
     if (!query.empty()) {
       flags |= telegram_api::stories_getStoryViewsList::Q_MASK;
     }
-    if (only_contacts) {
-      flags |= telegram_api::stories_getStoryViewsList::JUST_CONTACTS_MASK;
-    }
-    if (prefer_forwards) {
-      flags |= telegram_api::stories_getStoryViewsList::FORWARDS_FIRST_MASK;
-    }
-    if (prefer_with_reaction) {
-      flags |= telegram_api::stories_getStoryViewsList::REACTIONS_FIRST_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stories_getStoryViewsList(flags, false /*ignored*/, false /*ignored*/, false /*ignored*/,
+        telegram_api::stories_getStoryViewsList(flags, only_contacts, prefer_with_reaction, prefer_forwards,
                                                 std::move(input_peer), query, story_id.get(), offset, limit)));
   }
 
@@ -383,11 +369,8 @@ class GetStoryReactionsListQuery final : public Td::ResultHandler {
     if (!offset.empty()) {
       flags |= telegram_api::stories_getStoryReactionsList::OFFSET_MASK;
     }
-    if (prefer_forwards) {
-      flags |= telegram_api::stories_getStoryReactionsList::FORWARDS_FIRST_MASK;
-    }
     send_query(G()->net_query_creator().create(telegram_api::stories_getStoryReactionsList(
-        flags, false /*ignored*/, std::move(input_peer), story_full_id.get_story_id().get(),
+        flags, prefer_forwards, std::move(input_peer), story_full_id.get_story_id().get(),
         reaction_type.get_input_reaction(), offset, limit)));
   }
 
@@ -609,7 +592,7 @@ class EditStoryCoverQuery final : public Td::ResultHandler {
                                             main_frame_timestamp = main_frame_timestamp_,
                                             promise = std::move(promise_)](Result<Unit> result) mutable {
             if (result.is_error()) {
-              return promise.set_error(Status::Error(400, "Failed to edit cover"));
+              return promise.set_error(400, "Failed to edit cover");
             }
 
             send_closure(G()->story_manager(), &StoryManager::edit_story_cover, dialog_id, story_id,
@@ -964,6 +947,258 @@ class ReportStoryQuery final : public Td::ResultHandler {
   }
 };
 
+class GetStoryAlbumsQuery final : public Td::ResultHandler {
+  Promise<td_api::object_ptr<td_api::storyAlbums>> promise_;
+  DialogId owner_dialog_id_;
+
+ public:
+  explicit GetStoryAlbumsQuery(Promise<td_api::object_ptr<td_api::storyAlbums>> &&promise)
+      : promise_(std::move(promise)) {
+  }
+
+  void send(DialogId owner_dialog_id) {
+    owner_dialog_id_ = owner_dialog_id;
+    auto input_peer = td_->dialog_manager_->get_input_peer(owner_dialog_id_, AccessRights::Read);
+    CHECK(input_peer != nullptr);
+    send_query(G()->net_query_creator().create(telegram_api::stories_getAlbums(std::move(input_peer), 0)));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::stories_getAlbums>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    auto ptr = result_ptr.move_as_ok();
+    LOG(INFO) << "Receive result for GetStoryAlbumsQuery: " << to_string(ptr);
+    switch (ptr->get_id()) {
+      case telegram_api::stories_albumsNotModified::ID:
+        return promise_.set_value(td_api::make_object<td_api::storyAlbums>());
+      case telegram_api::stories_albums::ID: {
+        auto albums = telegram_api::move_object_as<telegram_api::stories_albums>(ptr);
+        auto result = td_api::make_object<td_api::storyAlbums>();
+        for (auto &album : albums->albums_) {
+          auto story_album = StoryAlbum(td_, owner_dialog_id_, std::move(album));
+          if (story_album.is_valid()) {
+            result->albums_.push_back(story_album.get_story_album_object(td_));
+          }
+        }
+        return promise_.set_value(std::move(result));
+      }
+      default:
+        UNREACHABLE();
+    }
+  }
+
+  void on_error(Status status) final {
+    td_->dialog_manager_->on_get_dialog_error(owner_dialog_id_, status, "GetStoryAlbumsQuery");
+    promise_.set_error(std::move(status));
+  }
+};
+
+class GetAlbumStoriesQuery final : public Td::ResultHandler {
+  Promise<telegram_api::object_ptr<telegram_api::stories_stories>> promise_;
+  DialogId dialog_id_;
+
+ public:
+  explicit GetAlbumStoriesQuery(Promise<telegram_api::object_ptr<telegram_api::stories_stories>> &&promise)
+      : promise_(std::move(promise)) {
+  }
+
+  void send(DialogId dialog_id, StoryAlbumId story_album_id, int32 offset, int32 limit) {
+    dialog_id_ = dialog_id;
+    auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id_, AccessRights::Read);
+    CHECK(input_peer != nullptr);
+    send_query(G()->net_query_creator().create(
+        telegram_api::stories_getAlbumStories(std::move(input_peer), story_album_id.get(), offset, limit)));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::stories_getAlbumStories>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    auto result = result_ptr.move_as_ok();
+    LOG(DEBUG) << "Receive result for GetAlbumStoriesQuery: " << to_string(result);
+    promise_.set_value(std::move(result));
+  }
+
+  void on_error(Status status) final {
+    td_->dialog_manager_->on_get_dialog_error(dialog_id_, status, "GetAlbumStoriesQuery");
+    promise_.set_error(std::move(status));
+  }
+};
+
+class CreateStoryAlbumQuery final : public Td::ResultHandler {
+  Promise<td_api::object_ptr<td_api::storyAlbum>> promise_;
+  DialogId owner_dialog_id_;
+  vector<StoryId> story_ids_;
+
+ public:
+  explicit CreateStoryAlbumQuery(Promise<td_api::object_ptr<td_api::storyAlbum>> &&promise)
+      : promise_(std::move(promise)) {
+  }
+
+  void send(DialogId owner_dialog_id, const string &title, const vector<StoryId> &story_ids) {
+    owner_dialog_id_ = owner_dialog_id;
+    story_ids_ = story_ids;
+    auto input_peer = td_->dialog_manager_->get_input_peer(owner_dialog_id_, AccessRights::Read);
+    CHECK(input_peer != nullptr);
+    send_query(G()->net_query_creator().create(
+        telegram_api::stories_createAlbum(std::move(input_peer), title, StoryId::get_input_story_ids(story_ids))));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::stories_createAlbum>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    auto ptr = result_ptr.move_as_ok();
+    LOG(INFO) << "Receive result for CreateStoryAlbumQuery: " << to_string(ptr);
+    StoryAlbum story_album(td_, owner_dialog_id_, std::move(ptr));
+    if (!story_album.is_valid()) {
+      return on_error(Status::Error(500, "Receive invalid album"));
+    }
+    td_->story_manager_->update_story_albums(owner_dialog_id_, story_ids_, story_album.get_story_album_id(), true);
+    promise_.set_value(story_album.get_story_album_object(td_));
+  }
+
+  void on_error(Status status) final {
+    td_->dialog_manager_->on_get_dialog_error(owner_dialog_id_, status, "CreateStoryAlbumQuery");
+    promise_.set_error(std::move(status));
+  }
+};
+
+class ReorderStoryAlbumsQuery final : public Td::ResultHandler {
+  Promise<Unit> promise_;
+  DialogId owner_dialog_id_;
+
+ public:
+  explicit ReorderStoryAlbumsQuery(Promise<Unit> &&promise) : promise_(std::move(promise)) {
+  }
+
+  void send(DialogId owner_dialog_id, const vector<StoryAlbumId> &story_album_ids) {
+    owner_dialog_id_ = owner_dialog_id;
+    auto input_peer = td_->dialog_manager_->get_input_peer(owner_dialog_id_, AccessRights::Read);
+    CHECK(input_peer != nullptr);
+    send_query(G()->net_query_creator().create(
+        telegram_api::stories_reorderAlbums(std::move(input_peer),
+                                            StoryAlbumId::get_input_story_album_ids(story_album_ids)),
+        {{owner_dialog_id_}}));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::stories_reorderAlbums>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    promise_.set_value(Unit());
+  }
+
+  void on_error(Status status) final {
+    td_->dialog_manager_->on_get_dialog_error(owner_dialog_id_, status, "ReorderStoryAlbumsQuery");
+    promise_.set_error(std::move(status));
+  }
+};
+
+class DeleteStoryAlbumQuery final : public Td::ResultHandler {
+  Promise<Unit> promise_;
+  DialogId owner_dialog_id_;
+
+ public:
+  explicit DeleteStoryAlbumQuery(Promise<Unit> &&promise) : promise_(std::move(promise)) {
+  }
+
+  void send(DialogId owner_dialog_id, StoryAlbumId story_album_id) {
+    owner_dialog_id_ = owner_dialog_id;
+    auto input_peer = td_->dialog_manager_->get_input_peer(owner_dialog_id_, AccessRights::Read);
+    CHECK(input_peer != nullptr);
+    send_query(G()->net_query_creator().create(
+        telegram_api::stories_deleteAlbum(std::move(input_peer), story_album_id.get()), {{owner_dialog_id_}}));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::stories_deleteAlbum>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    promise_.set_value(Unit());
+  }
+
+  void on_error(Status status) final {
+    td_->dialog_manager_->on_get_dialog_error(owner_dialog_id_, status, "DeleteStoryAlbumQuery");
+    promise_.set_error(std::move(status));
+  }
+};
+
+class UpdateStoryAlbumQuery final : public Td::ResultHandler {
+  Promise<td_api::object_ptr<td_api::storyAlbum>> promise_;
+  DialogId owner_dialog_id_;
+  StoryAlbumId story_album_id_;
+  vector<StoryId> deleted_story_ids_;
+  vector<StoryId> added_story_ids_;
+
+ public:
+  explicit UpdateStoryAlbumQuery(Promise<td_api::object_ptr<td_api::storyAlbum>> &&promise)
+      : promise_(std::move(promise)) {
+  }
+
+  void send(DialogId owner_dialog_id, StoryAlbumId story_album_id, const string &title,
+            const vector<StoryId> &deleted_story_ids, const vector<StoryId> &added_story_ids,
+            const vector<StoryId> &ordered_story_ids) {
+    owner_dialog_id_ = owner_dialog_id;
+    story_album_id_ = story_album_id;
+    deleted_story_ids_ = deleted_story_ids;
+    added_story_ids_ = added_story_ids;
+    auto input_peer = td_->dialog_manager_->get_input_peer(owner_dialog_id_, AccessRights::Read);
+    CHECK(input_peer != nullptr);
+    int32 flags = 0;
+    if (!title.empty()) {
+      flags |= telegram_api::stories_updateAlbum::TITLE_MASK;
+    }
+    if (!deleted_story_ids.empty()) {
+      flags |= telegram_api::stories_updateAlbum::DELETE_STORIES_MASK;
+    }
+    if (!added_story_ids.empty()) {
+      flags |= telegram_api::stories_updateAlbum::ADD_STORIES_MASK;
+    }
+    if (!ordered_story_ids.empty()) {
+      flags |= telegram_api::stories_updateAlbum::ORDER_MASK;
+    }
+    send_query(G()->net_query_creator().create(
+        telegram_api::stories_updateAlbum(
+            flags, std::move(input_peer), story_album_id.get(), title, StoryId::get_input_story_ids(deleted_story_ids),
+            StoryId::get_input_story_ids(added_story_ids), StoryId::get_input_story_ids(ordered_story_ids)),
+        {{owner_dialog_id_}}));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::stories_updateAlbum>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    auto ptr = result_ptr.move_as_ok();
+    LOG(INFO) << "Receive result for UpdateStoryAlbumQuery: " << to_string(ptr);
+    StoryAlbum story_album(td_, owner_dialog_id_, std::move(ptr));
+    if (story_album.get_story_album_id() != story_album_id_) {
+      return on_error(Status::Error(500, "Receive invalid album"));
+    }
+    promise_.set_value(story_album.get_story_album_object(td_));
+  }
+
+  void on_error(Status status) final {
+    td_->dialog_manager_->on_get_dialog_error(owner_dialog_id_, status, "UpdateStoryAlbumQuery");
+    td_->story_manager_->update_story_albums(owner_dialog_id_, deleted_story_ids_, story_album_id_, true);
+    td_->story_manager_->update_story_albums(owner_dialog_id_, added_story_ids_, story_album_id_, false);
+    promise_.set_error(std::move(status));
+  }
+};
+
 class GetStoriesMaxIdsQuery final : public Td::ResultHandler {
   vector<DialogId> dialog_ids_;
 
@@ -995,11 +1230,8 @@ class ActivateStealthModeQuery final : public Td::ResultHandler {
   }
 
   void send() {
-    int32 flags =
-        telegram_api::stories_activateStealthMode::PAST_MASK | telegram_api::stories_activateStealthMode::FUTURE_MASK;
-
-    send_query(G()->net_query_creator().create(
-        telegram_api::stories_activateStealthMode(flags, false /*ignored*/, false /*ignored*/), {{"view_story"}}));
+    send_query(
+        G()->net_query_creator().create(telegram_api::stories_activateStealthMode(0, true, true), {{"view_story"}}));
   }
 
   void on_result(BufferSlice packet) final {
@@ -1062,11 +1294,11 @@ class GetChatsToSendStoriesQuery final : public Td::ResultHandler {
 };
 
 class CanSendStoryQuery final : public Td::ResultHandler {
-  Promise<td_api::object_ptr<td_api::CanSendStoryResult>> promise_;
+  Promise<td_api::object_ptr<td_api::CanPostStoryResult>> promise_;
   DialogId dialog_id_;
 
  public:
-  explicit CanSendStoryQuery(Promise<td_api::object_ptr<td_api::CanSendStoryResult>> &&promise)
+  explicit CanSendStoryQuery(Promise<td_api::object_ptr<td_api::CanPostStoryResult>> &&promise)
       : promise_(std::move(promise)) {
   }
 
@@ -1085,11 +1317,12 @@ class CanSendStoryQuery final : public Td::ResultHandler {
       return on_error(result_ptr.move_as_error());
     }
 
-    promise_.set_value(td_api::make_object<td_api::canSendStoryResultOk>());
+    auto ptr = result_ptr.move_as_ok();
+    promise_.set_value(td_api::make_object<td_api::canPostStoryResultOk>(ptr->count_remains_));
   }
 
   void on_error(Status status) final {
-    auto result = StoryManager::get_can_send_story_result_object(status);
+    auto result = StoryManager::get_can_post_story_result_object(status);
     if (result != nullptr) {
       return promise_.set_value(std::move(result));
     }
@@ -1131,7 +1364,8 @@ class StoryManager::SendStoryQuery final : public Td::ResultHandler {
 
     const FormattedText &caption = story->caption_;
     auto entities = get_input_message_entities(td_->user_manager_.get(), &caption, "SendStoryQuery");
-    if (!td_->option_manager_->get_option_boolean("can_use_text_entities_in_story_caption")) {
+    if (!td_->auth_manager_->is_bot() &&
+        !td_->option_manager_->get_option_boolean("can_use_text_entities_in_story_caption")) {
       entities.clear();
     }
     auto privacy_rules = story->privacy_rules_.get_input_privacy_rules(td_);
@@ -1143,30 +1377,27 @@ class StoryManager::SendStoryQuery final : public Td::ResultHandler {
     if (!entities.empty()) {
       flags |= telegram_api::stories_sendStory::ENTITIES_MASK;
     }
-    if (pending_story_->story_->is_pinned_) {
-      flags |= telegram_api::stories_sendStory::PINNED_MASK;
-    }
     if (period != 86400) {
       flags |= telegram_api::stories_sendStory::PERIOD_MASK;
     }
     if (story->forward_info_ != nullptr) {
-      flags |= telegram_api::stories_sendStory::FWD_MODIFIED_MASK;
       flags |= telegram_api::stories_sendStory::FWD_FROM_ID_MASK;
       flags |= telegram_api::stories_sendStory::FWD_FROM_STORY_MASK;
-    }
-    if (story->noforwards_) {
-      flags |= telegram_api::stories_sendStory::NOFORWARDS_MASK;
     }
     auto input_media_areas = MediaArea::get_input_media_areas(td_, story->areas_);
     if (!input_media_areas.empty()) {
       flags |= telegram_api::stories_sendStory::MEDIA_AREAS_MASK;
     }
+    if (!story->album_ids_.empty()) {
+      flags |= telegram_api::stories_sendStory::ALBUMS_MASK;
+    }
 
     send_query(G()->net_query_creator().create(
-        telegram_api::stories_sendStory(flags, false /*ignored*/, false /*ignored*/, false /*ignored*/,
-                                        std::move(input_peer), std::move(input_media), std::move(input_media_areas),
-                                        caption.text, std::move(entities), std::move(privacy_rules),
-                                        pending_story_->random_id_, period, std::move(fwd_input_peer), fwd_story_id),
+        telegram_api::stories_sendStory(
+            flags, pending_story_->story_->is_pinned_, story->noforwards_, story->forward_info_ != nullptr,
+            std::move(input_peer), std::move(input_media), std::move(input_media_areas), caption.text,
+            std::move(entities), std::move(privacy_rules), pending_story_->random_id_, period,
+            std::move(fwd_input_peer), fwd_story_id, StoryAlbumId::get_input_story_album_ids(story->album_ids_)),
         {{pending_story_->dialog_id_}}));
   }
 
@@ -1209,8 +1440,8 @@ class StoryManager::EditStoryQuery final : public Td::ResultHandler {
   unique_ptr<PendingStory> pending_story_;
 
  public:
-  void send(const Story *story, unique_ptr<PendingStory> pending_story,
-            telegram_api::object_ptr<telegram_api::InputFile> input_file, const BeingEditedStory *edited_story) {
+  void send(unique_ptr<PendingStory> pending_story, telegram_api::object_ptr<telegram_api::InputFile> input_file,
+            const BeingEditedStory *edited_story) {
     pending_story_ = std::move(pending_story);
     CHECK(pending_story_ != nullptr);
     dialog_id_ = pending_story_->dialog_id_;
@@ -1289,6 +1520,68 @@ class StoryManager::EditStoryQuery final : public Td::ResultHandler {
   }
 };
 
+class StoryManager::EditBusinessStoryQuery final : public Td::ResultHandler {
+  DialogId dialog_id_;
+  unique_ptr<PendingStory> pending_story_;
+
+ public:
+  void send(unique_ptr<PendingStory> pending_story, telegram_api::object_ptr<telegram_api::InputFile> input_file,
+            const BeingEditedBusinessStory *edited_story) {
+    pending_story_ = std::move(pending_story);
+    CHECK(pending_story_ != nullptr);
+    dialog_id_ = pending_story_->dialog_id_;
+
+    auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id_, AccessRights::Read);
+    if (input_peer == nullptr) {
+      return on_error(Status::Error(400, "Can't access the chat"));
+    }
+
+    int32 flags = telegram_api::stories_editStory::MEDIA_MASK | telegram_api::stories_editStory::MEDIA_AREAS_MASK |
+                  telegram_api::stories_editStory::CAPTION_MASK | telegram_api::stories_editStory::ENTITIES_MASK |
+                  telegram_api::stories_editStory::PRIVACY_RULES_MASK;
+    const StoryContent *content = edited_story->content_.get();
+    CHECK(input_file != nullptr);
+    auto input_media = get_story_content_input_media(td_, content, std::move(input_file));
+    CHECK(input_media != nullptr);
+    auto input_media_areas = MediaArea::get_input_media_areas(td_, edited_story->areas_);
+    auto entities =
+        get_input_message_entities(td_->user_manager_.get(), &edited_story->caption_, "EditBusinessStoryQuery");
+    auto input_privacy_rules = edited_story->privacy_rules_.get_input_privacy_rules(td_);
+    send_query(G()->net_query_creator().create(
+        telegram_api::stories_editStory(flags, std::move(input_peer), pending_story_->story_id_.get(),
+                                        std::move(input_media), std::move(input_media_areas),
+                                        edited_story->caption_.text, std::move(entities),
+                                        std::move(input_privacy_rules)),
+        {{StoryFullId{pending_story_->dialog_id_, pending_story_->story_id_}}}));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::stories_editStory>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    auto ptr = result_ptr.move_as_ok();
+    LOG(INFO) << "Receive result for EditBusinessStoryQuery: " << to_string(ptr);
+
+    td_->story_manager_->on_edit_business_story(std::move(pending_story_), std::move(ptr));
+  }
+
+  void on_error(Status status) final {
+    CHECK(td_->auth_manager_->is_bot());
+    LOG(INFO) << "Receive error for EditBusinessStoryQuery: " << status;
+
+    auto bad_parts = FileManager::get_missing_file_parts(status);
+    if (!bad_parts.empty()) {
+      td_->story_manager_->on_send_story_file_parts_missing(std::move(pending_story_), std::move(bad_parts));
+      return;
+    }
+
+    td_->dialog_manager_->on_get_dialog_error(dialog_id_, status, "EditBusinessStoryQuery");
+    td_->story_manager_->delete_pending_story(std::move(pending_story_), std::move(status));
+  }
+};
+
 class StoryManager::UploadMediaCallback final : public FileManager::UploadCallback {
  public:
   void on_upload_ok(FileUploadId file_upload_id, telegram_api::object_ptr<telegram_api::InputFile> input_file) final {
@@ -1330,6 +1623,7 @@ void StoryManager::Story::store(StorerT &storer) const {
   bool has_chosen_reaction_type = !chosen_reaction_type_.is_empty();
   bool has_forward_info = forward_info_ != nullptr;
   bool has_sender_dialog_id = sender_dialog_id_ != DialogId();
+  bool has_album_ids = !album_ids_.empty();
   BEGIN_STORE_FLAGS();
   STORE_FLAG(is_edited_);
   STORE_FLAG(is_pinned_);
@@ -1348,6 +1642,7 @@ void StoryManager::Story::store(StorerT &storer) const {
   STORE_FLAG(is_outgoing_);
   STORE_FLAG(has_forward_info);
   STORE_FLAG(has_sender_dialog_id);
+  STORE_FLAG(has_album_ids);
   END_STORE_FLAGS();
   store(date_, storer);
   store(expire_date_, storer);
@@ -1378,6 +1673,9 @@ void StoryManager::Story::store(StorerT &storer) const {
   if (has_sender_dialog_id) {
     store(sender_dialog_id_, storer);
   }
+  if (has_album_ids) {
+    store(album_ids_, storer);
+  }
 }
 
 template <class ParserT>
@@ -1392,6 +1690,7 @@ void StoryManager::Story::parse(ParserT &parser) {
   bool has_chosen_reaction_type;
   bool has_forward_info;
   bool has_sender_dialog_id;
+  bool has_album_ids;
   BEGIN_PARSE_FLAGS();
   PARSE_FLAG(is_edited_);
   PARSE_FLAG(is_pinned_);
@@ -1410,6 +1709,7 @@ void StoryManager::Story::parse(ParserT &parser) {
   PARSE_FLAG(is_outgoing_);
   PARSE_FLAG(has_forward_info);
   PARSE_FLAG(has_sender_dialog_id);
+  PARSE_FLAG(has_album_ids);
   END_PARSE_FLAGS();
   parse(date_, parser);
   parse(expire_date_, parser);
@@ -1439,6 +1739,9 @@ void StoryManager::Story::parse(ParserT &parser) {
   }
   if (has_sender_dialog_id) {
     parse(sender_dialog_id_, parser);
+  }
+  if (has_album_ids) {
+    parse(album_ids_, parser);
   }
 }
 
@@ -1590,11 +1893,11 @@ StoryManager::StoryManager(Td *td, ActorShared<> parent) : td_(td), parent_(std:
 }
 
 StoryManager::~StoryManager() {
-  Scheduler::instance()->destroy_on_scheduler(G()->get_gc_scheduler_id(), story_full_id_to_file_source_id_, stories_,
-                                              stories_by_global_id_, inaccessible_story_full_ids_,
-                                              deleted_story_full_ids_, failed_to_load_story_full_ids_, story_messages_,
-                                              story_quick_reply_messages_, active_stories_, updated_active_stories_,
-                                              max_read_story_ids_, failed_to_load_active_stories_);
+  Scheduler::instance()->destroy_on_scheduler(
+      G()->get_gc_scheduler_id(), story_full_id_to_file_source_id_, stories_, stories_by_global_id_,
+      inaccessible_story_full_ids_, deleted_story_full_ids_, failed_to_load_story_full_ids_,
+      story_album_full_id_to_file_source_id_, story_album_file_ids_, story_messages_, story_quick_reply_messages_,
+      active_stories_, updated_active_stories_, max_read_story_ids_, failed_to_load_active_stories_);
 }
 
 void StoryManager::start_up() {
@@ -1815,12 +2118,27 @@ bool StoryManager::can_get_story_view_count(DialogId owner_dialog_id) {
   }
 }
 
+bool StoryManager::can_have_stories(DialogId owner_dialog_id) const {
+  switch (owner_dialog_id.get_type()) {
+    case DialogType::User:
+      return !td_->user_manager_->is_user_bot(owner_dialog_id.get_user_id());
+    case DialogType::Channel:
+      return !td_->chat_manager_->is_monoforum_channel(owner_dialog_id.get_channel_id());
+    case DialogType::Chat:
+    case DialogType::SecretChat:
+    case DialogType::None:
+    default:
+      return false;
+  }
+}
+
 bool StoryManager::can_post_stories(DialogId owner_dialog_id) const {
   switch (owner_dialog_id.get_type()) {
     case DialogType::User:
-      return is_my_story(owner_dialog_id);
+      return is_my_story(owner_dialog_id) != td_->auth_manager_->is_bot();
     case DialogType::Channel:
-      return td_->chat_manager_->get_channel_status(owner_dialog_id.get_channel_id()).can_post_stories();
+      return !td_->auth_manager_->is_bot() &&
+             td_->chat_manager_->get_channel_status(owner_dialog_id.get_channel_id()).can_post_stories();
     case DialogType::Chat:
     case DialogType::SecretChat:
     case DialogType::None:
@@ -1832,9 +2150,10 @@ bool StoryManager::can_post_stories(DialogId owner_dialog_id) const {
 bool StoryManager::can_edit_stories(DialogId owner_dialog_id) const {
   switch (owner_dialog_id.get_type()) {
     case DialogType::User:
-      return is_my_story(owner_dialog_id);
+      return is_my_story(owner_dialog_id) != td_->auth_manager_->is_bot();
     case DialogType::Channel:
-      return td_->chat_manager_->get_channel_status(owner_dialog_id.get_channel_id()).can_edit_stories();
+      return !td_->auth_manager_->is_bot() &&
+             td_->chat_manager_->get_channel_status(owner_dialog_id.get_channel_id()).can_edit_stories();
     case DialogType::Chat:
     case DialogType::SecretChat:
     case DialogType::None:
@@ -1846,9 +2165,10 @@ bool StoryManager::can_edit_stories(DialogId owner_dialog_id) const {
 bool StoryManager::can_delete_stories(DialogId owner_dialog_id) const {
   switch (owner_dialog_id.get_type()) {
     case DialogType::User:
-      return is_my_story(owner_dialog_id);
+      return is_my_story(owner_dialog_id) != td_->auth_manager_->is_bot();
     case DialogType::Channel:
-      return td_->chat_manager_->get_channel_status(owner_dialog_id.get_channel_id()).can_delete_stories();
+      return !td_->auth_manager_->is_bot() &&
+             td_->chat_manager_->get_channel_status(owner_dialog_id.get_channel_id()).can_delete_stories();
     case DialogType::Chat:
     case DialogType::SecretChat:
     case DialogType::None:
@@ -1861,8 +2181,12 @@ bool StoryManager::can_edit_story(StoryFullId story_full_id, const Story *story)
   if (!story_full_id.get_story_id().is_server()) {
     return false;
   }
+  if (story != nullptr && story->content_ != nullptr && !can_edit_story_content(story->content_->get_type())) {
+    return false;
+  }
   auto owner_dialog_id = story_full_id.get_dialog_id();
-  return can_edit_stories(owner_dialog_id) || (story->is_outgoing_ && can_post_stories(owner_dialog_id));
+  return can_edit_stories(owner_dialog_id) ||
+         (story != nullptr && story->is_outgoing_ && can_post_stories(owner_dialog_id));
 }
 
 bool StoryManager::can_toggle_story_is_pinned(StoryFullId story_full_id, const Story *story) const {
@@ -1870,6 +2194,14 @@ bool StoryManager::can_toggle_story_is_pinned(StoryFullId story_full_id, const S
     return false;
   }
   return can_edit_stories(story_full_id.get_dialog_id());
+}
+
+bool StoryManager::can_add_story_to_album(StoryFullId story_full_id, const Story *story) const {
+  if (!story_full_id.get_story_id().is_server()) {
+    return false;
+  }
+  auto owner_dialog_id = story_full_id.get_dialog_id();
+  return can_edit_stories(owner_dialog_id);
 }
 
 bool StoryManager::can_delete_story(StoryFullId story_full_id, const Story *story) const {
@@ -1882,6 +2214,14 @@ bool StoryManager::can_delete_story(StoryFullId story_full_id, const Story *stor
 
 bool StoryManager::is_active_story(const Story *story) {
   return story != nullptr && G()->unix_time() < story->expire_date_;
+}
+
+Status StoryManager::can_manage_story_albums(DialogId owner_dialog_id, const char *source) const {
+  TRY_STATUS(td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read, source));
+  if (!can_edit_stories(owner_dialog_id)) {
+    return Status::Error(400, "Can't manage story albums of the chat");
+  }
+  return Status::OK();
 }
 
 int32 StoryManager::get_story_viewers_expire_date(const Story *story) const {
@@ -2038,8 +2378,8 @@ StoryManager::ActiveStories *StoryManager::get_active_stories_force(DialogId own
     return active_stories;
   }
 
-  if (!G()->use_message_database() || failed_to_load_active_stories_.count(owner_dialog_id) > 0 ||
-      !owner_dialog_id.is_valid()) {
+  if (td_->auth_manager_->is_bot() || !G()->use_message_database() ||
+      failed_to_load_active_stories_.count(owner_dialog_id) > 0 || !owner_dialog_id.is_valid()) {
     return nullptr;
   }
 
@@ -2125,17 +2465,18 @@ void StoryManager::add_pending_story_dependencies(Dependencies &dependencies, co
 
 void StoryManager::load_active_stories(StoryListId story_list_id, Promise<Unit> &&promise) {
   if (!story_list_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Story list must be non-empty"));
+    return promise.set_error(400, "Story list must be non-empty");
   }
   auto &story_list = get_story_list(story_list_id);
   if (story_list.list_last_story_date_ == MAX_DIALOG_DATE) {
-    return promise.set_error(Status::Error(404, "Not found"));
+    return promise.set_error(404, "Not found");
   }
 
   if (story_list.database_has_more_) {
     CHECK(G()->use_message_database());
     story_list.load_list_from_database_queries_.push_back(std::move(promise));
     if (story_list.load_list_from_database_queries_.size() == 1u) {
+      LOG(INFO) << "Load active stories in " << story_list_id << " from database";
       G()->td_db()->get_story_db_async()->get_active_story_list(
           story_list_id, story_list.last_loaded_database_dialog_date_.get_order(),
           story_list.last_loaded_database_dialog_date_.get_dialog_id(), 10,
@@ -2158,7 +2499,7 @@ void StoryManager::load_active_stories(StoryListId story_list_id, Promise<Unit> 
       }
       update_story_list_sent_total_count(story_list_id, story_list, "load_active_stories");
     }
-    return promise.set_error(Status::Error(404, "Not found"));
+    return promise.set_error(404, "Not found");
   }
 
   load_active_stories_from_server(story_list_id, story_list, !story_list.state_.empty(), std::move(promise));
@@ -2235,6 +2576,7 @@ void StoryManager::load_active_stories_from_server(StoryListId story_list_id, St
                                                    Promise<Unit> &&promise) {
   story_list.load_list_from_server_queries_.push_back(std::move(promise));
   if (story_list.load_list_from_server_queries_.size() == 1u) {
+    LOG(INFO) << "Load active stories in " << story_list_id << " from server";
     auto query_promise =
         PromiseCreator::lambda([actor_id = actor_id(this), story_list_id, is_next, state = story_list.state_](
                                    Result<telegram_api::object_ptr<telegram_api::stories_AllStories>> r_all_stories) {
@@ -2482,7 +2824,7 @@ void StoryManager::toggle_dialog_stories_hidden(DialogId dialog_id, StoryListId 
     return promise.set_value(Unit());
   }
   if (!story_list_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Story list must be non-empty"));
+    return promise.set_error(400, "Story list must be non-empty");
   }
 
   td_->create_handler<ToggleStoriesHiddenQuery>(std::move(promise))
@@ -2492,13 +2834,16 @@ void StoryManager::toggle_dialog_stories_hidden(DialogId dialog_id, StoryListId 
 void StoryManager::get_dialog_pinned_stories(DialogId owner_dialog_id, StoryId from_story_id, int32 limit,
                                              Promise<td_api::object_ptr<td_api::stories>> &&promise) {
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
   TRY_STATUS_PROMISE(promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read,
                                                                         "get_dialog_pinned_stories"));
 
   if (from_story_id != StoryId() && !from_story_id.is_server()) {
-    return promise.set_error(Status::Error(400, "Invalid value of parameter from_story_id specified"));
+    return promise.set_error(400, "Invalid value of parameter from_story_id specified");
+  }
+  if (!can_have_stories(owner_dialog_id)) {
+    return promise.set_value(td_api::make_object<td_api::stories>());
   }
 
   auto query_promise =
@@ -2529,16 +2874,16 @@ void StoryManager::on_get_dialog_pinned_stories(DialogId owner_dialog_id,
 void StoryManager::get_story_archive(DialogId owner_dialog_id, StoryId from_story_id, int32 limit,
                                      Promise<td_api::object_ptr<td_api::stories>> &&promise) {
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
   if (from_story_id != StoryId() && !from_story_id.is_server()) {
-    return promise.set_error(Status::Error(400, "Invalid value of parameter from_story_id specified"));
+    return promise.set_error(400, "Invalid value of parameter from_story_id specified");
   }
   if (!td_->dialog_manager_->have_dialog_force(owner_dialog_id, "get_story_archive")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
   if (!can_edit_stories(owner_dialog_id)) {
-    return promise.set_error(Status::Error(400, "Can't get story archive in the chat"));
+    return promise.set_error(400, "Can't get story archive in the chat");
   }
 
   auto query_promise =
@@ -2582,6 +2927,8 @@ void StoryManager::get_dialog_expiring_stories(DialogId owner_dialog_id,
     }
     promise.set_value(get_chat_active_stories_object(owner_dialog_id, active_stories));
     promise = {};
+  } else if (!can_have_stories(owner_dialog_id)) {
+    return promise.set_value(td_api::make_object<td_api::chatActiveStories>());
   }
 
   auto query_promise =
@@ -2597,7 +2944,7 @@ void StoryManager::get_dialog_expiring_stories(DialogId owner_dialog_id,
 }
 
 void StoryManager::reload_dialog_expiring_stories(DialogId dialog_id) {
-  if (!td_->dialog_manager_->have_input_peer(dialog_id, false, AccessRights::Read)) {
+  if (!td_->dialog_manager_->have_input_peer(dialog_id, false, AccessRights::Read) || !can_have_stories(dialog_id)) {
     return;
   }
   td_->dialog_manager_->force_create_dialog(dialog_id, "reload_dialog_expiring_stories");
@@ -2626,12 +2973,13 @@ uint64 StoryManager::save_load_dialog_expiring_stories_log_event(DialogId owner_
 }
 
 void StoryManager::load_dialog_expiring_stories(DialogId owner_dialog_id, uint64 log_event_id, const char *source) {
-  if (load_expiring_stories_log_event_ids_.count(owner_dialog_id) > 0) {
+  if (load_expiring_stories_log_event_ids_.count(owner_dialog_id) > 0 || !can_have_stories(owner_dialog_id)) {
     if (log_event_id != 0) {
       binlog_erase(G()->td_db()->get_binlog(), log_event_id);
     }
     return;
   }
+
   LOG(INFO) << "Load active stories in " << owner_dialog_id << " from " << source;
   if (log_event_id == 0 && G()->use_message_database()) {
     log_event_id = save_load_dialog_expiring_stories_log_event(owner_dialog_id);
@@ -2686,7 +3034,7 @@ void StoryManager::on_get_dialog_expiring_stories(DialogId owner_dialog_id,
 void StoryManager::search_hashtag_posts(DialogId dialog_id, string hashtag, string offset, int32 limit,
                                         Promise<td_api::object_ptr<td_api::foundStories>> &&promise) {
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
   if (limit > MAX_SEARCH_STORIES) {
     limit = MAX_SEARCH_STORIES;
@@ -2714,7 +3062,7 @@ void StoryManager::search_hashtag_posts(DialogId dialog_id, string hashtag, stri
 void StoryManager::search_location_posts(td_api::object_ptr<td_api::locationAddress> &&address, string offset,
                                          int32 limit, Promise<td_api::object_ptr<td_api::foundStories>> &&promise) {
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
   if (limit > MAX_SEARCH_STORIES) {
     limit = MAX_SEARCH_STORIES;
@@ -2726,7 +3074,7 @@ void StoryManager::search_location_posts(td_api::object_ptr<td_api::locationAddr
 void StoryManager::search_venue_posts(string venue_provider, string venue_id, string offset, int32 limit,
                                       Promise<td_api::object_ptr<td_api::foundStories>> &&promise) {
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
   if (limit > MAX_SEARCH_STORIES) {
     limit = MAX_SEARCH_STORIES;
@@ -2735,23 +3083,47 @@ void StoryManager::search_venue_posts(string venue_provider, string venue_id, st
   td_->create_handler<SearchStoriesQuery>(std::move(promise))->send(venue_provider, venue_id, offset, limit);
 }
 
+Status StoryManager::check_story_id(const StoryId &story_id, bool only_server) const {
+  if (!story_id.is_valid()) {
+    return Status::Error(400, "Invalid story identifier specified");
+  }
+  if (only_server && !story_id.is_server()) {
+    return Status::Error(400, "Can't use the story");
+  }
+  return Status::OK();
+}
+
+Status StoryManager::check_story_ids(const vector<StoryId> &story_ids, bool only_server) const {
+  for (auto story_id : story_ids) {
+    TRY_STATUS(check_story_id(story_id, only_server));
+  }
+  return Status::OK();
+}
+
+Status StoryManager::check_story_album_id(StoryAlbumId story_album_id) const {
+  if (!story_album_id.is_valid()) {
+    return Status::Error(400, "Invalid story album identifier specified");
+  }
+  return Status::OK();
+}
+
 void StoryManager::set_pinned_stories(DialogId owner_dialog_id, vector<StoryId> story_ids, Promise<Unit> &&promise) {
   TRY_STATUS_PROMISE(promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Write,
                                                                         "set_pinned_stories"));
   if (!can_edit_stories(owner_dialog_id)) {
-    return promise.set_error(Status::Error(400, "Can't change pinned stories in the chat"));
+    return promise.set_error(400, "Can't change pinned stories in the chat");
   }
   for (const auto &story_id : story_ids) {
     StoryFullId story_full_id{owner_dialog_id, story_id};
     const Story *story = get_story(story_full_id);
     if (story == nullptr) {
-      return promise.set_error(Status::Error(400, "Story not found"));
+      return promise.set_error(400, "Story not found");
     }
     if (!story->is_pinned_) {
-      return promise.set_error(Status::Error(400, "The story must be posted to the chat page first"));
+      return promise.set_error(400, "The story must be posted to the chat page first");
     }
     if (!story_id.is_server()) {
-      return promise.set_error(Status::Error(400, "Story must be sent first"));
+      return promise.set_error(400, "Story must be sent first");
     }
   }
   td_->create_handler<TogglePinnedStoriesToTopQuery>(std::move(promise))->send(owner_dialog_id, std::move(story_ids));
@@ -2760,9 +3132,7 @@ void StoryManager::set_pinned_stories(DialogId owner_dialog_id, vector<StoryId> 
 void StoryManager::open_story(DialogId owner_dialog_id, StoryId story_id, Promise<Unit> &&promise) {
   TRY_STATUS_PROMISE(
       promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read, "open_story"));
-  if (!story_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Invalid story identifier specified"));
-  }
+  TRY_STATUS_PROMISE(promise, check_story_id(story_id, false));
 
   StoryFullId story_full_id{owner_dialog_id, story_id};
   const Story *story = get_story(story_full_id);
@@ -2819,15 +3189,13 @@ void StoryManager::open_story(DialogId owner_dialog_id, StoryId story_id, Promis
 void StoryManager::close_story(DialogId owner_dialog_id, StoryId story_id, Promise<Unit> &&promise) {
   TRY_STATUS_PROMISE(
       promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read, "close_story"));
-  if (!story_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Invalid story identifier specified"));
-  }
+  TRY_STATUS_PROMISE(promise, check_story_id(story_id, false));
 
   StoryFullId story_full_id{owner_dialog_id, story_id};
   if (can_get_story_view_count(owner_dialog_id) && story_id.is_server()) {
     auto &open_count = opened_stories_with_view_count_[story_full_id];
     if (open_count == 0) {
-      return promise.set_error(Status::Error(400, "The story wasn't opened"));
+      return promise.set_error(400, "The story wasn't opened");
     }
     if (--open_count == 0) {
       opened_stories_with_view_count_.erase(story_full_id);
@@ -2930,20 +3298,15 @@ void StoryManager::set_story_reaction(StoryFullId story_full_id, ReactionType re
   auto owner_dialog_id = story_full_id.get_dialog_id();
   TRY_STATUS_PROMISE(promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read,
                                                                         "set_story_reaction"));
-  if (!story_full_id.get_story_id().is_valid()) {
-    return promise.set_error(Status::Error(400, "Invalid story identifier specified"));
-  }
-  if (!story_full_id.get_story_id().is_server()) {
-    return promise.set_error(Status::Error(400, "Can't react to the story"));
-  }
+  TRY_STATUS_PROMISE(promise, check_story_id(story_full_id.get_story_id(), true));
 
   Story *story = get_story_force(story_full_id, "set_story_reaction");
   if (story == nullptr) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
 
   if (!can_use_story_reaction(story, reaction_type)) {
-    return promise.set_error(Status::Error(400, "The reaction isn't available for the story"));
+    return promise.set_error(400, "The reaction isn't available for the story");
   }
 
   if (story->chosen_reaction_type_ == reaction_type) {
@@ -3157,10 +3520,10 @@ void StoryManager::get_story_interactions(StoryId story_id, const string &query,
   StoryFullId story_full_id{owner_dialog_id, story_id};
   const Story *story = get_story(story_full_id);
   if (story == nullptr) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
   if (!story_id.is_server()) {
     return promise.set_value(td_api::make_object<td_api::storyInteractions>());
@@ -3261,16 +3624,16 @@ void StoryManager::get_dialog_story_interactions(StoryFullId story_full_id, Reac
                                                  Promise<td_api::object_ptr<td_api::storyInteractions>> &&promise) {
   const Story *story = get_story(story_full_id);
   if (story == nullptr) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
   if (!story_full_id.get_story_id().is_server()) {
     return promise.set_value(td_api::make_object<td_api::storyInteractions>());
   }
   if (reaction_type.is_paid_reaction()) {
-    return promise.set_error(Status::Error(400, "Stories can't have paid reactions"));
+    return promise.set_error(400, "Stories can't have paid reactions");
   }
 
   auto query_promise = PromiseCreator::lambda(
@@ -3315,13 +3678,146 @@ void StoryManager::on_get_dialog_story_interactions(
 void StoryManager::report_story(StoryFullId story_full_id, const string &option_id, const string &text,
                                 Promise<td_api::object_ptr<td_api::ReportStoryResult>> &&promise) {
   if (!have_story_force(story_full_id)) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (!story_full_id.is_server()) {
-    return promise.set_error(Status::Error(400, "Story can't be reported"));
+    return promise.set_error(400, "Story can't be reported");
   }
 
   td_->create_handler<ReportStoryQuery>(std::move(promise))->send(story_full_id, option_id, text);
+}
+
+void StoryManager::get_story_albums(DialogId owner_dialog_id,
+                                    Promise<td_api::object_ptr<td_api::storyAlbums>> &&promise) {
+  TRY_STATUS_PROMISE(promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read,
+                                                                        "get_story_albums"));
+  td_->create_handler<GetStoryAlbumsQuery>(std::move(promise))->send(owner_dialog_id);
+}
+
+void StoryManager::get_story_album_stories(DialogId owner_dialog_id, StoryAlbumId story_album_id, int32 offset,
+                                           int32 limit, Promise<td_api::object_ptr<td_api::stories>> &&promise) {
+  if (limit <= 0) {
+    return promise.set_error(400, "Parameter limit must be positive");
+  }
+  TRY_STATUS_PROMISE(promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read,
+                                                                        "get_story_album_stories"));
+  TRY_STATUS_PROMISE(promise, check_story_album_id(story_album_id));
+  if (offset < 0) {
+    return promise.set_error(400, "Invalid offset specified");
+  }
+  if (!can_have_stories(owner_dialog_id)) {
+    return promise.set_value(td_api::make_object<td_api::stories>());
+  }
+
+  auto query_promise =
+      PromiseCreator::lambda([actor_id = actor_id(this), owner_dialog_id, story_album_id, promise = std::move(promise)](
+                                 Result<telegram_api::object_ptr<telegram_api::stories_stories>> &&result) mutable {
+        if (result.is_error()) {
+          return promise.set_error(result.move_as_error());
+        }
+        send_closure(actor_id, &StoryManager::on_get_story_album_stories, owner_dialog_id, story_album_id,
+                     result.move_as_ok(), std::move(promise));
+      });
+  td_->create_handler<GetAlbumStoriesQuery>(std::move(query_promise))
+      ->send(owner_dialog_id, story_album_id, offset, limit);
+}
+
+void StoryManager::on_get_story_album_stories(DialogId owner_dialog_id, StoryAlbumId story_album_id,
+                                              telegram_api::object_ptr<telegram_api::stories_stories> &&stories,
+                                              Promise<td_api::object_ptr<td_api::stories>> &&promise) {
+  TRY_STATUS_PROMISE(promise, G()->close_status());
+  auto result = on_get_stories(owner_dialog_id, {}, std::move(stories));
+  update_story_albums(owner_dialog_id, result.second, story_album_id, true);
+  promise.set_value(get_stories_object(
+      result.first,
+      transform(result.second, [owner_dialog_id](StoryId story_id) { return StoryFullId(owner_dialog_id, story_id); }),
+      vector<StoryId>()));
+}
+
+void StoryManager::update_story_albums(DialogId owner_dialog_id, const vector<StoryId> &story_ids,
+                                       StoryAlbumId story_album_id, bool is_add) {
+  for (auto story_id : story_ids) {
+    auto story_full_id = StoryFullId{owner_dialog_id, story_id};
+    auto *story = get_story_force(story_full_id, "update_story_albums");
+    if (story == nullptr || is_add == td::contains(story->album_ids_, story_album_id)) {
+      continue;
+    }
+    if (is_add) {
+      story->album_ids_.push_back(story_album_id);
+      std::sort(story->album_ids_.begin(), story->album_ids_.end());
+    } else {
+      td::remove(story->album_ids_, story_album_id);
+    }
+    on_story_changed(story_full_id, story, true, true);
+  }
+}
+
+void StoryManager::create_story_album(DialogId owner_dialog_id, const string &title, const vector<StoryId> &story_ids,
+                                      Promise<td_api::object_ptr<td_api::storyAlbum>> &&promise) {
+  TRY_STATUS_PROMISE(promise, can_manage_story_albums(owner_dialog_id, "create_story_album"));
+  TRY_STATUS_PROMISE(promise, check_story_ids(story_ids, true));
+  if (title.empty()) {
+    return promise.set_error(400, "Story album name must be non-empty");
+  }
+  td_->create_handler<CreateStoryAlbumQuery>(std::move(promise))->send(owner_dialog_id, title, story_ids);
+}
+
+void StoryManager::reorder_story_albums(DialogId owner_dialog_id, const vector<StoryAlbumId> &story_album_ids,
+                                        Promise<Unit> &&promise) {
+  TRY_STATUS_PROMISE(promise, can_manage_story_albums(owner_dialog_id, "reorder_story_albums"));
+  for (auto story_album_id : story_album_ids) {
+    TRY_STATUS_PROMISE(promise, check_story_album_id(story_album_id));
+  }
+  td_->create_handler<ReorderStoryAlbumsQuery>(std::move(promise))->send(owner_dialog_id, story_album_ids);
+}
+
+void StoryManager::delete_story_album(DialogId owner_dialog_id, StoryAlbumId story_album_id, Promise<Unit> &&promise) {
+  TRY_STATUS_PROMISE(promise, can_manage_story_albums(owner_dialog_id, "delete_story_album"));
+  TRY_STATUS_PROMISE(promise, check_story_album_id(story_album_id));
+  td_->create_handler<DeleteStoryAlbumQuery>(std::move(promise))->send(owner_dialog_id, story_album_id);
+}
+
+void StoryManager::set_story_album_title(DialogId owner_dialog_id, StoryAlbumId story_album_id, const string &title,
+                                         Promise<td_api::object_ptr<td_api::storyAlbum>> &&promise) {
+  TRY_STATUS_PROMISE(promise, can_manage_story_albums(owner_dialog_id, "set_story_album_title"));
+  TRY_STATUS_PROMISE(promise, check_story_album_id(story_album_id));
+  if (title.empty()) {
+    return promise.set_error(400, "Story album name must be non-empty");
+  }
+  td_->create_handler<UpdateStoryAlbumQuery>(std::move(promise))
+      ->send(owner_dialog_id, story_album_id, title, {}, {}, {});
+}
+
+void StoryManager::add_story_album_stories(DialogId owner_dialog_id, StoryAlbumId story_album_id,
+                                           const vector<StoryId> &story_ids,
+                                           Promise<td_api::object_ptr<td_api::storyAlbum>> &&promise) {
+  TRY_STATUS_PROMISE(promise, can_manage_story_albums(owner_dialog_id, "add_story_album_stories"));
+  TRY_STATUS_PROMISE(promise, check_story_album_id(story_album_id));
+  TRY_STATUS_PROMISE(promise, check_story_ids(story_ids, true));
+  update_story_albums(owner_dialog_id, story_ids, story_album_id, true);
+  td_->create_handler<UpdateStoryAlbumQuery>(std::move(promise))
+      ->send(owner_dialog_id, story_album_id, {}, {}, story_ids, {});
+}
+
+void StoryManager::remove_story_album_stories(DialogId owner_dialog_id, StoryAlbumId story_album_id,
+                                              const vector<StoryId> &story_ids,
+                                              Promise<td_api::object_ptr<td_api::storyAlbum>> &&promise) {
+  TRY_STATUS_PROMISE(promise, can_manage_story_albums(owner_dialog_id, "remove_story_album_stories"));
+  TRY_STATUS_PROMISE(promise, check_story_album_id(story_album_id));
+  TRY_STATUS_PROMISE(promise, check_story_ids(story_ids, true));
+  update_story_albums(owner_dialog_id, story_ids, story_album_id, false);
+  td_->create_handler<UpdateStoryAlbumQuery>(std::move(promise))
+      ->send(owner_dialog_id, story_album_id, {}, story_ids, {}, {});
+}
+
+void StoryManager::reorder_story_album_stories(DialogId owner_dialog_id, StoryAlbumId story_album_id,
+                                               const vector<StoryId> &story_ids,
+                                               Promise<td_api::object_ptr<td_api::storyAlbum>> &&promise) {
+  TRY_STATUS_PROMISE(promise, can_manage_story_albums(owner_dialog_id, "remove_story_album_stories"));
+  TRY_STATUS_PROMISE(promise, check_story_album_id(story_album_id));
+  TRY_STATUS_PROMISE(promise, check_story_ids(story_ids, true));
+  td_->create_handler<UpdateStoryAlbumQuery>(std::move(promise))
+      ->send(owner_dialog_id, story_album_id, {}, {}, {}, story_ids);
 }
 
 void StoryManager::activate_stealth_mode(Promise<Unit> &&promise) {
@@ -3399,6 +3895,43 @@ void StoryManager::unregister_story(StoryFullId story_full_id, MessageFullId mes
     if (message_ids.empty()) {
       story_messages_.erase(story_full_id);
     }
+  }
+}
+
+FileSourceId StoryManager::get_story_album_file_source_id(StoryAlbumFullId story_album_full_id) {
+  if (td_->auth_manager_->is_bot()) {
+    return FileSourceId();
+  }
+
+  if (!story_album_full_id.is_valid()) {
+    return FileSourceId();
+  }
+
+  auto &file_source_id = story_album_full_id_to_file_source_id_[story_album_full_id];
+  if (!file_source_id.is_valid()) {
+    file_source_id = td_->file_reference_manager_->create_story_album_file_source(story_album_full_id);
+  }
+  return file_source_id;
+}
+
+void StoryManager::register_story_album(StoryAlbumFullId story_album_full_id, const StoryAlbum &story_album) {
+  CHECK(story_album.is_valid());
+  auto new_file_ids = story_album.get_file_ids(td_);
+  auto old_file_ids = story_album_file_ids_.get(story_album_full_id);
+  if (new_file_ids == old_file_ids) {
+    return;
+  }
+
+  for (auto file_id : old_file_ids) {
+    if (!td::contains(new_file_ids, file_id)) {
+      send_closure(G()->file_manager(), &FileManager::delete_file, file_id, Promise<Unit>(), "register_story_album");
+    }
+  }
+
+  auto file_source_id = get_story_album_file_source_id(story_album_full_id);
+  if (file_source_id.is_valid()) {
+    td_->file_manager_->change_files_source(file_source_id, old_file_ids, new_file_ids, "register_story_album");
+    story_album_file_ids_.set(story_album_full_id, std::move(new_file_ids));
   }
 }
 
@@ -3485,6 +4018,7 @@ td_api::object_ptr<td_api::story> StoryManager::get_story_object(StoryFullId sto
   auto changelog_dialog_id = get_changelog_story_dialog_id();
   auto is_visible_only_for_self = !story_id.is_server() || owner_dialog_id == changelog_dialog_id ||
                                   (!story->is_pinned_ && !is_active_story(story));
+  auto can_be_added_to_album = can_add_story_to_album(story_full_id, story);
   auto can_be_deleted = can_delete_story(story_full_id, story);
   auto can_be_edited = can_edit_story(story_full_id, story);
   auto can_be_forwarded = !story->noforwards_ && story_id.is_server() &&
@@ -3514,11 +4048,12 @@ td_api::object_ptr<td_api::story> StoryManager::get_story_object(StoryFullId sto
           ? nullptr
           : get_message_sender_object(td_, story->sender_dialog_id_, "get_story_object 2"),
       story->date_, is_being_sent, is_being_edited, is_edited, story->is_pinned_, is_visible_only_for_self,
-      can_be_deleted, can_be_edited, can_be_forwarded, can_be_replied, can_toggle_is_pinned, can_get_statistics,
-      can_get_interactions, has_expired_viewers, std::move(repost_info), std::move(interaction_info),
-      story->chosen_reaction_type_.get_reaction_type_object(), std::move(privacy_settings),
+      can_be_added_to_album, can_be_deleted, can_be_edited, can_be_forwarded, can_be_replied, can_toggle_is_pinned,
+      can_get_statistics, can_get_interactions, has_expired_viewers, std::move(repost_info),
+      std::move(interaction_info), story->chosen_reaction_type_.get_reaction_type_object(), std::move(privacy_settings),
       get_story_content_object(td_, content), std::move(story_areas),
-      get_formatted_text_object(td_->user_manager_.get(), *caption, true, get_story_content_duration(td_, content)));
+      get_formatted_text_object(td_->user_manager_.get(), *caption, true, get_story_content_duration(td_, content)),
+      StoryAlbumId::get_story_album_ids_object(story->album_ids_));
 }
 
 td_api::object_ptr<td_api::stories> StoryManager::get_stories_object(int32 total_count,
@@ -3539,6 +4074,7 @@ td_api::object_ptr<td_api::chatActiveStories> StoryManager::get_chat_active_stor
   StoryId max_read_story_id;
   vector<td_api::object_ptr<td_api::storyInfo>> stories;
   int64 order = 0;
+  bool can_be_archived = false;
   if (active_stories != nullptr) {
     story_list_id = active_stories->story_list_id_;
     max_read_story_id = active_stories->max_read_story_id_;
@@ -3554,6 +4090,7 @@ td_api::object_ptr<td_api::chatActiveStories> StoryManager::get_chat_active_stor
     if (story_list_id.is_valid()) {
       order = active_stories->public_order_;
     }
+    can_be_archived = active_stories->can_be_archived_;
   } else {
     story_list_id = get_dialog_story_list_id(owner_dialog_id);
   }
@@ -3568,29 +4105,29 @@ td_api::object_ptr<td_api::chatActiveStories> StoryManager::get_chat_active_stor
   }
   return td_api::make_object<td_api::chatActiveStories>(
       td_->dialog_manager_->get_chat_id_object(owner_dialog_id, "updateChatActiveStories"),
-      story_list_id.get_story_list_object(), order, max_read_story_id.get(), std::move(stories));
+      story_list_id.get_story_list_object(), order, can_be_archived, max_read_story_id.get(), std::move(stories));
 }
 
-td_api::object_ptr<td_api::CanSendStoryResult> StoryManager::get_can_send_story_result_object(const Status &error,
+td_api::object_ptr<td_api::CanPostStoryResult> StoryManager::get_can_post_story_result_object(const Status &error,
                                                                                               bool force) {
   CHECK(error.is_error());
   if (error.message() == "PREMIUM_ACCOUNT_REQUIRED") {
-    return td_api::make_object<td_api::canSendStoryResultPremiumNeeded>();
+    return td_api::make_object<td_api::canPostStoryResultPremiumNeeded>();
   }
   if (error.message() == "BOOSTS_REQUIRED") {
-    return td_api::make_object<td_api::canSendStoryResultBoostNeeded>();
+    return td_api::make_object<td_api::canPostStoryResultBoostNeeded>();
   }
   if (error.message() == "STORIES_TOO_MUCH") {
-    return td_api::make_object<td_api::canSendStoryResultActiveStoryLimitExceeded>();
+    return td_api::make_object<td_api::canPostStoryResultActiveStoryLimitExceeded>();
   }
   if (begins_with(error.message(), "STORY_SEND_FLOOD_WEEKLY_")) {
     auto r_next_date = to_integer_safe<int32>(error.message().substr(Slice("STORY_SEND_FLOOD_WEEKLY_").size()));
     if (r_next_date.is_ok() && r_next_date.ok() > 0) {
       auto retry_after = r_next_date.ok() - G()->unix_time();
       if (retry_after > 0 || force) {
-        return td_api::make_object<td_api::canSendStoryResultWeeklyLimitExceeded>(max(retry_after, 0));
+        return td_api::make_object<td_api::canPostStoryResultWeeklyLimitExceeded>(max(retry_after, 0));
       } else {
-        return td_api::make_object<td_api::canSendStoryResultOk>();
+        return td_api::make_object<td_api::canPostStoryResultOk>(1);
       }
     }
   }
@@ -3599,9 +4136,9 @@ td_api::object_ptr<td_api::CanSendStoryResult> StoryManager::get_can_send_story_
     if (r_next_date.is_ok() && r_next_date.ok() > 0) {
       auto retry_after = r_next_date.ok() - G()->unix_time();
       if (retry_after > 0 || force) {
-        return td_api::make_object<td_api::canSendStoryResultMonthlyLimitExceeded>(max(retry_after, 0));
+        return td_api::make_object<td_api::canPostStoryResultMonthlyLimitExceeded>(max(retry_after, 0));
       } else {
-        return td_api::make_object<td_api::canSendStoryResultOk>();
+        return td_api::make_object<td_api::canPostStoryResultOk>(1);
       }
     }
   }
@@ -3646,9 +4183,6 @@ StoryId StoryManager::on_get_story(DialogId owner_dialog_id,
     LOG(ERROR) << "Receive a story in " << owner_dialog_id;
     return {};
   }
-  if (td_->auth_manager_->is_bot()) {
-    return {};
-  }
   CHECK(story_item_ptr != nullptr);
   switch (story_item_ptr->get_id()) {
     case telegram_api::storyItemDeleted::ID:
@@ -3679,8 +4213,7 @@ StoryId StoryManager::on_get_new_story(DialogId owner_dialog_id,
     return StoryId();
   }
 
-  td_->dialog_manager_->force_create_dialog(owner_dialog_id, "on_get_new_story");
-
+  bool is_bot = td_->auth_manager_->is_bot();
   StoryId old_story_id;
   auto updates_story_ids_it = update_story_ids_.find(story_full_id);
   if (updates_story_ids_it != update_story_ids_.end()) {
@@ -3699,12 +4232,14 @@ StoryId StoryManager::on_get_new_story(DialogId owner_dialog_id,
     }
   }
 
-  bool is_bot = td_->auth_manager_->is_bot();
+  td_->dialog_manager_->force_create_dialog(owner_dialog_id, "on_get_new_story");
+
   auto caption =
       get_message_text(td_->user_manager_.get(), std::move(story_item->caption_), std::move(story_item->entities_),
                        true, is_bot, story_item->date_, false, "on_get_new_story");
   auto content = get_story_content(td_, std::move(story_item->media_), owner_dialog_id);
   if (content == nullptr) {
+    LOG(INFO) << "Failed to get content of " << story_full_id;
     return StoryId();
   }
 
@@ -3819,6 +4354,20 @@ StoryId StoryManager::on_get_new_story(DialogId owner_dialog_id,
       story->is_outgoing_ = story_item->out_;
       need_save_to_database = true;
     }
+
+    auto album_ids = StoryAlbumId::get_story_album_ids(story_item->albums_);
+    td::remove_if(album_ids, [](auto album_id) {
+      if (!album_id.is_valid()) {
+        LOG(ERROR) << "Receive " << album_id;
+        return true;
+      }
+      return false;
+    });
+    std::sort(album_ids.begin(), album_ids.end());
+    if (story->album_ids_ != album_ids) {
+      story->album_ids_ = std::move(album_ids);
+      is_changed = true;
+    }
   }
   if (story->caption_ != caption) {
     story->caption_ = std::move(caption);
@@ -3854,7 +4403,7 @@ StoryId StoryManager::on_get_new_story(DialogId owner_dialog_id,
 
   LOG(INFO) << "Receive " << story_full_id;
 
-  if (is_active_story(story)) {
+  if (!td_->auth_manager_->is_bot() && is_active_story(story)) {
     auto active_stories = get_active_stories_force(owner_dialog_id, "on_get_new_story");
     if (active_stories == nullptr) {
       if (is_subscribed_to_dialog_stories(owner_dialog_id)) {
@@ -3887,8 +4436,12 @@ StoryId StoryManager::on_get_new_story(DialogId owner_dialog_id,
 
   if (old_story_id.is_valid()) {
     send_closure(G()->td(), &Td::send_update,
-                 td_api::make_object<td_api::updateStorySendSucceeded>(get_story_object(story_full_id, story),
+                 td_api::make_object<td_api::updateStoryPostSucceeded>(get_story_object(story_full_id, story),
                                                                        old_story_id.get()));
+    if (td_->auth_manager_->is_bot()) {
+      on_delete_story(story_full_id);
+      return StoryId();
+    }
   }
 
   return story_id;
@@ -3966,9 +4519,12 @@ void StoryManager::on_delete_story(StoryFullId story_full_id) {
 
   update_story_ids_.erase(story_full_id);
 
-  inaccessible_story_full_ids_.set(story_full_id, Time::now());
-  send_closure_later(G()->messages_manager(),
-                     &MessagesManager::update_story_max_reply_media_timestamp_in_replied_messages, story_full_id);
+  bool is_bot = td_->auth_manager_->is_bot();
+  if (!is_bot) {
+    inaccessible_story_full_ids_.set(story_full_id, Time::now());
+    send_closure_later(G()->messages_manager(),
+                       &MessagesManager::update_story_max_reply_media_timestamp_in_replied_messages, story_full_id);
+  }
 
   const Story *story = get_story_force(story_full_id, "on_delete_story");
   auto owner_dialog_id = story_full_id.get_dialog_id();
@@ -3997,12 +4553,14 @@ void StoryManager::on_delete_story(StoryFullId story_full_id) {
     LOG(INFO) << "Delete not found " << story_full_id;
   }
 
-  auto active_stories = get_active_stories_force(owner_dialog_id, "on_get_deleted_story");
-  if (active_stories != nullptr && contains(active_stories->story_ids_, story_id)) {
-    auto story_ids = active_stories->story_ids_;
-    td::remove(story_ids, story_id);
-    on_update_active_stories(owner_dialog_id, active_stories->max_read_story_id_, std::move(story_ids), Promise<Unit>(),
-                             "on_delete_story");
+  if (!is_bot) {
+    auto active_stories = get_active_stories_force(owner_dialog_id, "on_delete_story");
+    if (active_stories != nullptr && contains(active_stories->story_ids_, story_id)) {
+      auto story_ids = active_stories->story_ids_;
+      td::remove(story_ids, story_id);
+      on_update_active_stories(owner_dialog_id, active_stories->max_read_story_id_, std::move(story_ids),
+                               Promise<Unit>(), "on_delete_story");
+    }
   }
 
   delete_story_from_database(story_full_id);
@@ -4403,6 +4961,9 @@ bool StoryManager::update_active_stories_order(DialogId owner_dialog_id, ActiveS
   LOG(INFO) << "Update order of active stories of " << owner_dialog_id << " in " << story_list_id << " from "
             << active_stories->private_order_ << '/' << active_stories->public_order_ << " to " << new_private_order;
 
+  bool can_be_archived =
+      story_list_id == StoryListId::main() && (owner_dialog_id.get_type() != DialogType::User ||
+                                               td_->user_manager_->is_user_contact(owner_dialog_id.get_user_id()));
   int64 new_public_order = 0;
   if (story_list_id.is_valid()) {
     auto &story_list = get_story_list(story_list_id);
@@ -4426,14 +4987,15 @@ bool StoryManager::update_active_stories_order(DialogId owner_dialog_id, ActiveS
   }
 
   if (active_stories->private_order_ != new_private_order || active_stories->public_order_ != new_public_order ||
-      active_stories->story_list_id_ != story_list_id) {
+      active_stories->story_list_id_ != story_list_id || active_stories->can_be_archived_ != can_be_archived) {
     LOG(INFO) << "Update order of active stories of " << owner_dialog_id << " to " << new_private_order << '/'
               << new_public_order << " in list " << story_list_id;
     if (active_stories->private_order_ != new_private_order || active_stories->story_list_id_ != story_list_id) {
       *need_save_to_database = true;
     }
     active_stories->private_order_ = new_private_order;
-    if (active_stories->public_order_ != new_public_order || active_stories->story_list_id_ != story_list_id) {
+    if (active_stories->public_order_ != new_public_order || active_stories->story_list_id_ != story_list_id ||
+        active_stories->can_be_archived_ != can_be_archived) {
       if (active_stories->story_list_id_ != story_list_id) {
         if (active_stories->story_list_id_.is_valid() && active_stories->public_order_ != 0) {
           active_stories->public_order_ = 0;
@@ -4442,6 +5004,7 @@ bool StoryManager::update_active_stories_order(DialogId owner_dialog_id, ActiveS
         active_stories->story_list_id_ = story_list_id;
       }
       active_stories->public_order_ = new_public_order;
+      active_stories->can_be_archived_ = can_be_archived;
       return true;
     }
   }
@@ -4478,6 +5041,9 @@ td_api::object_ptr<td_api::updateChatActiveStories> StoryManager::get_update_cha
 
 void StoryManager::send_update_chat_active_stories(DialogId owner_dialog_id, const ActiveStories *active_stories,
                                                    const char *source) {
+  if (td_->auth_manager_->is_bot()) {
+    return;
+  }
   if (updated_active_stories_.count(owner_dialog_id) == 0) {
     if (active_stories == nullptr || active_stories->public_order_ == 0) {
       LOG(INFO) << "Skip update about active stories in " << owner_dialog_id << " from " << source;
@@ -4541,7 +5107,7 @@ void StoryManager::on_update_story_id(int64 random_id, StoryId new_story_id, con
   CHECK(is_deleted);
 
   if (!have_story_force(old_story_full_id)) {
-    LOG(INFO) << "Can't find sent story " << old_story_full_id;
+    LOG(INFO) << "Can't find sent " << old_story_full_id;
     // delete_sent_story_on_server(old_story_full_id, new_story_id);
     return;
   }
@@ -4686,6 +5252,9 @@ DialogId StoryManager::get_changelog_story_dialog_id() const {
 }
 
 bool StoryManager::is_subscribed_to_dialog_stories(DialogId owner_dialog_id) const {
+  if (td_->auth_manager_->is_bot()) {
+    return false;
+  }
   if (owner_dialog_id == get_changelog_story_dialog_id()) {
     return true;
   }
@@ -4694,7 +5263,13 @@ bool StoryManager::is_subscribed_to_dialog_stories(DialogId owner_dialog_id) con
       if (is_my_story(owner_dialog_id)) {
         return true;
       }
-      return td_->user_manager_->is_user_contact(owner_dialog_id.get_user_id());
+      if (td_->user_manager_->is_user_contact(owner_dialog_id.get_user_id())) {
+        return true;
+      }
+      if (td::contains(td_->top_dialog_manager_->get_story_dialog_ids(), owner_dialog_id)) {
+        return true;
+      }
+      return false;
     case DialogType::Channel:
       return td_->chat_manager_->get_channel_status(owner_dialog_id.get_channel_id()).is_member();
     case DialogType::Chat:
@@ -4728,9 +5303,10 @@ StoryListId StoryManager::get_dialog_story_list_id(DialogId owner_dialog_id) con
   }
 }
 
-void StoryManager::on_dialog_active_stories_order_updated(DialogId owner_dialog_id, const char *source) {
+void StoryManager::on_dialog_active_stories_order_updated(DialogId owner_dialog_id, const char *source, bool force) {
   // called from update_user/on_channel_status_changed, must not create the dialog and hence must not load active stories
-  auto active_stories = get_active_stories_editable(owner_dialog_id);
+  auto active_stories =
+      force ? get_active_stories_force(owner_dialog_id, source) : get_active_stories_editable(owner_dialog_id);
   bool need_save_to_database = false;
   if (active_stories != nullptr &&
       update_active_stories_order(owner_dialog_id, active_stories, &need_save_to_database)) {
@@ -4780,7 +5356,7 @@ void StoryManager::on_view_dialog_active_stories(vector<DialogId> dialog_ids) {
   }
   LOG(DEBUG) << "View active stories of " << dialog_ids;
 
-  const size_t MAX_SLICE_SIZE = 100;  // server side limit
+  const size_t MAX_SLICE_SIZE = 100;  // server-side limit
   vector<DialogId> input_dialog_ids;
   vector<telegram_api::object_ptr<telegram_api::InputPeer>> input_peers;
   for (auto &dialog_id : dialog_ids) {
@@ -4880,9 +5456,7 @@ void StoryManager::reload_story(StoryFullId story_full_id, Promise<Unit> &&promi
   LOG(INFO) << "Reload " << story_full_id << " from " << source;
   auto dialog_id = story_full_id.get_dialog_id();
   auto story_id = story_full_id.get_story_id();
-  if (!story_id.is_server()) {
-    return promise.set_error(Status::Error(400, "Invalid story identifier"));
-  }
+  TRY_STATUS_PROMISE(promise, check_story_id(story_id, true));
 
   auto &queries = reload_story_queries_[story_full_id];
   if (!queries.empty() && !promise) {
@@ -4917,13 +5491,28 @@ void StoryManager::on_reload_story(StoryFullId story_full_id, Result<Unit> &&res
   }
 }
 
+void StoryManager::reload_story_album(StoryAlbumFullId story_album_full_id, Promise<Unit> &&promise,
+                                      const char *source) {
+  LOG(INFO) << "Reload " << story_album_full_id << " from " << source;
+  auto owner_dialog_id = story_album_full_id.get_dialog_id();
+  TRY_STATUS_PROMISE(promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read,
+                                                                        "reload_story_album"));
+  auto query_promise = PromiseCreator::lambda(
+      [promise = std::move(promise)](Result<td_api::object_ptr<td_api::storyAlbums>> result) mutable {
+        if (result.is_error()) {
+          promise.set_error(result.move_as_error());
+        } else {
+          promise.set_value(Unit());
+        }
+      });
+  td_->create_handler<GetStoryAlbumsQuery>(std::move(query_promise))->send(owner_dialog_id);
+}
+
 void StoryManager::get_story(DialogId owner_dialog_id, StoryId story_id, bool only_local,
                              Promise<td_api::object_ptr<td_api::story>> &&promise) {
   TRY_STATUS_PROMISE(
       promise, td_->dialog_manager_->check_dialog_access(owner_dialog_id, false, AccessRights::Read, "get_story"));
-  if (!story_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Invalid story identifier specified"));
-  }
+  TRY_STATUS_PROMISE(promise, check_story_id(story_id, false));
 
   StoryFullId story_full_id{owner_dialog_id, story_id};
   const Story *story = get_story_force(story_full_id, "get_story");
@@ -5102,12 +5691,12 @@ void StoryManager::save_channels_to_send_stories() {
 }
 
 void StoryManager::can_send_story(DialogId dialog_id,
-                                  Promise<td_api::object_ptr<td_api::CanSendStoryResult>> &&promise) {
+                                  Promise<td_api::object_ptr<td_api::CanPostStoryResult>> &&promise) {
   if (!td_->dialog_manager_->have_dialog_force(dialog_id, "can_send_story")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
   if (!can_post_stories(dialog_id)) {
-    return promise.set_error(Status::Error(400, "Not enough rights to post stories in the chat"));
+    return promise.set_error(400, "Not enough rights to post stories in the chat");
   }
   td_->create_handler<CanSendStoryQuery>(std::move(promise))->send(dialog_id);
 }
@@ -5115,21 +5704,25 @@ void StoryManager::can_send_story(DialogId dialog_id,
 void StoryManager::send_story(DialogId dialog_id, td_api::object_ptr<td_api::InputStoryContent> &&input_story_content,
                               td_api::object_ptr<td_api::inputStoryAreas> &&input_areas,
                               td_api::object_ptr<td_api::formattedText> &&input_caption,
-                              td_api::object_ptr<td_api::StoryPrivacySettings> &&settings, int32 active_period,
+                              td_api::object_ptr<td_api::StoryPrivacySettings> &&settings,
+                              vector<StoryAlbumId> story_album_ids, int32 active_period,
                               td_api::object_ptr<td_api::storyFullId> &&from_story_full_id, bool is_pinned,
                               bool protect_content, Promise<td_api::object_ptr<td_api::story>> &&promise) {
   if (!td_->dialog_manager_->have_dialog_force(dialog_id, "send_story")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
   if (!can_post_stories(dialog_id)) {
-    return promise.set_error(Status::Error(400, "Not enough rights to post stories in the chat"));
+    return promise.set_error(400, "Not enough rights to post stories in the chat");
+  }
+  for (auto story_album_id : story_album_ids) {
+    TRY_STATUS_PROMISE(promise, check_story_album_id(story_album_id));
   }
 
   bool is_bot = td_->auth_manager_->is_bot();
   TRY_RESULT_PROMISE(promise, content, get_input_story_content(td_, std::move(input_story_content), dialog_id));
   TRY_RESULT_PROMISE(promise, caption,
                      get_formatted_text(td_, DialogId(), std::move(input_caption), is_bot, true, false, false));
-  if (dialog_id != td_->dialog_manager_->get_my_dialog_id()) {
+  if (dialog_id != td_->dialog_manager_->get_my_dialog_id() && !is_bot) {
     settings = td_api::make_object<td_api::storyPrivacySettingsEveryone>();
   }
   TRY_RESULT_PROMISE(promise, privacy_rules,
@@ -5138,42 +5731,50 @@ void StoryManager::send_story(DialogId dialog_id, td_api::object_ptr<td_api::Inp
   StoryFullId forward_from_story_full_id;
   if (from_story_full_id != nullptr) {
     forward_from_story_full_id =
-        StoryFullId(DialogId(from_story_full_id->sender_chat_id_), StoryId(from_story_full_id->story_id_));
-    const Story *story = get_story(forward_from_story_full_id);
-    if (story == nullptr || story->content_ == nullptr) {
-      return promise.set_error(Status::Error(400, "Story to repost not found"));
-    }
-    if (story->noforwards_) {
-      return promise.set_error(Status::Error(400, "Story can't be reposted"));
-    }
-    if (story->forward_info_ != nullptr) {
-      forward_info = make_unique<StoryForwardInfo>(*story->forward_info_);
-    } else {
+        StoryFullId(DialogId(from_story_full_id->poster_chat_id_), StoryId(from_story_full_id->story_id_));
+    if (is_bot) {
+      auto from_dialog_id = forward_from_story_full_id.get_dialog_id();
+      if (!forward_from_story_full_id.is_valid() || from_dialog_id.get_type() != DialogType::User ||
+          !td_->dialog_manager_->have_input_peer(from_dialog_id, false, AccessRights::Read)) {
+        return promise.set_error(400, "Invalid story to repost specified");
+      }
       forward_info = make_unique<StoryForwardInfo>(forward_from_story_full_id, true);
+    } else {
+      const Story *story = get_story(forward_from_story_full_id);
+      if (story == nullptr || story->content_ == nullptr) {
+        return promise.set_error(400, "Story to repost not found");
+      }
+      if (story->noforwards_) {
+        return promise.set_error(400, "Story can't be reposted");
+      }
+      if (story->forward_info_ != nullptr) {
+        forward_info = make_unique<StoryForwardInfo>(*story->forward_info_);
+      } else {
+        forward_info = make_unique<StoryForwardInfo>(forward_from_story_full_id, true);
+      }
     }
     forward_info->hide_sender_if_needed(td_);
   }
   if (active_period != 86400 && !(G()->is_test_dc() && (active_period == 60 || active_period == 300))) {
-    bool is_premium = td_->option_manager_->get_option_boolean("is_premium");
+    bool is_premium = td_->option_manager_->get_option_boolean("is_premium") || is_bot;
     if (!is_premium || !td::contains(vector<int32>{6 * 3600, 12 * 3600, 2 * 86400}, active_period)) {
-      return promise.set_error(Status::Error(400, "Invalid story active period specified"));
+      return promise.set_error(400, "Invalid story active period specified");
     }
   }
   TRY_RESULT_PROMISE(promise, story_id, get_next_yet_unsent_story_id(dialog_id));
   vector<MediaArea> areas;
   if (input_areas != nullptr) {
+    vector<MediaArea> old_media_areas;
     for (auto &input_area : input_areas->areas_) {
-      MediaArea media_area(td_, std::move(input_area), Auto());
+      MediaArea media_area(td_, std::move(input_area), old_media_areas);
       if (media_area.is_valid()) {
         areas.push_back(std::move(media_area));
       }
     }
   }
-  if (!td_->option_manager_->get_option_boolean("can_use_text_entities_in_story_caption")) {
+  if (!is_bot && !td_->option_manager_->get_option_boolean("can_use_text_entities_in_story_caption")) {
     caption.entities.clear();
   }
-
-  td_->dialog_manager_->force_create_dialog(dialog_id, "send_story");
 
   auto story = make_unique<Story>();
   if (dialog_id.get_type() == DialogType::Channel &&
@@ -5190,6 +5791,7 @@ void StoryManager::send_story(DialogId dialog_id, td_api::object_ptr<td_api::Inp
   story->is_outgoing_ = true;
   story->noforwards_ = protect_content;
   story->privacy_rules_ = std::move(privacy_rules);
+  story->album_ids_ = std::move(story_album_ids);
   story->content_ = std::move(content);
   story->forward_info_ = std::move(forward_info);
   story->areas_ = std::move(areas);
@@ -5260,13 +5862,12 @@ void StoryManager::do_send_story(unique_ptr<PendingStory> &&pending_story, vecto
     story->is_outgoing_ = true;
     story->noforwards_ = pending_story->story_->noforwards_;
     story->privacy_rules_ = pending_story->story_->privacy_rules_;
+    story->album_ids_ = pending_story->story_->album_ids_;
     story->content_ = copy_story_content(pending_story->story_->content_.get());
     story->areas_ = pending_story->story_->areas_;
     story->caption_ = pending_story->story_->caption_;
     send_update_story(story_full_id, story.get());
     stories_.set(story_full_id, std::move(story));
-
-    auto active_stories = get_active_stories_force(pending_story->dialog_id_, "do_send_story");
 
     CHECK(pending_story->dialog_id_.is_valid());
     CHECK(pending_story->random_id_ != 0);
@@ -5275,9 +5876,13 @@ void StoryManager::do_send_story(unique_ptr<PendingStory> &&pending_story, vecto
     being_sent_stories_[pending_story->random_id_] = story_full_id;
     being_sent_story_random_ids_[story_full_id] = pending_story->random_id_;
 
-    updated_active_stories_.insert(pending_story->dialog_id_);
-    send_update_chat_active_stories(pending_story->dialog_id_, active_stories, "do_send_story");
-    update_story_list_sent_total_count(StoryListId::main(), "do_send_story");
+    if (!td_->auth_manager_->is_bot()) {
+      auto active_stories = get_active_stories_force(pending_story->dialog_id_, "do_send_story");
+
+      updated_active_stories_.insert(pending_story->dialog_id_);
+      send_update_chat_active_stories(pending_story->dialog_id_, active_stories, "do_send_story");
+      update_story_list_sent_total_count(StoryListId::main(), "do_send_story");
+    }
   }
 
   auto file_upload_id = pending_story->file_upload_id_;
@@ -5471,13 +6076,14 @@ void StoryManager::edit_story(DialogId owner_dialog_id, StoryId story_id,
                               td_api::object_ptr<td_api::InputStoryContent> &&input_story_content,
                               td_api::object_ptr<td_api::inputStoryAreas> &&input_areas,
                               td_api::object_ptr<td_api::formattedText> &&input_caption, Promise<Unit> &&promise) {
+  CHECK(!td_->auth_manager_->is_bot());
   StoryFullId story_full_id{owner_dialog_id, story_id};
   const Story *story = get_story(story_full_id);
   if (story == nullptr || story->content_ == nullptr) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (!can_edit_story(story_full_id, story)) {
-    return promise.set_error(Status::Error(400, "Story can't be edited"));
+    return promise.set_error(400, "Story can't be edited");
   }
 
   bool is_bot = td_->auth_manager_->is_bot();
@@ -5505,7 +6111,7 @@ void StoryManager::edit_story(DialogId owner_dialog_id, StoryId story_id,
     if (*current_areas == areas) {
       are_media_areas_edited = false;
     } else if (content == nullptr) {
-      return promise.set_error(Status::Error(400, "Can't edit story areas without content"));
+      return promise.set_error(400, "Can't edit story areas without content");
     }
   }
   if (is_caption_edited) {
@@ -5578,8 +6184,96 @@ void StoryManager::edit_story(DialogId owner_dialog_id, StoryId story_id,
   do_send_story(std::move(pending_story), {});
 }
 
+void StoryManager::edit_business_story(DialogId owner_dialog_id, StoryId story_id,
+                                       td_api::object_ptr<td_api::InputStoryContent> &&input_story_content,
+                                       td_api::object_ptr<td_api::inputStoryAreas> &&input_areas,
+                                       td_api::object_ptr<td_api::formattedText> &&input_caption,
+                                       td_api::object_ptr<td_api::StoryPrivacySettings> &&settings,
+                                       Promise<td_api::object_ptr<td_api::story>> &&promise) {
+  CHECK(td_->auth_manager_->is_bot());
+  StoryFullId story_full_id{owner_dialog_id, story_id};
+  if (!can_edit_story(story_full_id, nullptr)) {
+    return promise.set_error(400, "Story can't be edited");
+  }
+
+  bool is_bot = true;
+  TRY_RESULT_PROMISE(promise, content, get_input_story_content(td_, std::move(input_story_content), owner_dialog_id));
+  vector<MediaArea> areas;
+  if (input_areas != nullptr) {
+    vector<MediaArea> old_media_areas;
+    for (auto &input_area : input_areas->areas_) {
+      MediaArea media_area(td_, std::move(input_area), old_media_areas);
+      if (media_area.is_valid()) {
+        areas.push_back(std::move(media_area));
+      }
+    }
+  }
+  TRY_RESULT_PROMISE(promise, caption,
+                     get_formatted_text(td_, DialogId(), std::move(input_caption), is_bot, true, false, false));
+  TRY_RESULT_PROMISE(promise, privacy_rules,
+                     UserPrivacySettingRules::get_user_privacy_setting_rules(td_, std::move(settings)));
+
+  auto edit_story_num = ++send_story_count_;
+  if (edit_story_num == 0) {
+    edit_story_num = ++send_story_count_;
+  }
+
+  auto &edited_story = being_edited_business_stories_[edit_story_num];
+  CHECK(edited_story == nullptr);
+  edited_story = make_unique<BeingEditedBusinessStory>();
+  edited_story->content_ = std::move(content);
+  edited_story->areas_ = std::move(areas);
+  edited_story->caption_ = std::move(caption);
+  edited_story->privacy_rules_ = std::move(privacy_rules);
+  edited_story->promise_ = std::move(promise);
+
+  auto new_story = make_unique<Story>();
+  new_story->content_ = copy_story_content(edited_story->content_.get());
+
+  auto pending_story =
+      td::make_unique<PendingStory>(owner_dialog_id, story_id, StoryFullId(), edit_story_num, 0, std::move(new_story));
+
+  do_send_story(std::move(pending_story), {});
+}
+
+void StoryManager::on_edit_business_story(unique_ptr<PendingStory> &&pending_story,
+                                          telegram_api::object_ptr<telegram_api::Updates> updates) {
+  CHECK(pending_story != nullptr);
+  if (pending_story->file_upload_id_.is_valid()) {
+    td_->file_manager_->delete_partial_remote_location(pending_story->file_upload_id_);
+  }
+  auto it = being_edited_business_stories_.find(pending_story->send_story_num_);
+  CHECK(it != being_edited_business_stories_.end());
+  auto promise = std::move(it->second->promise_);
+  being_edited_business_stories_.erase(it);
+
+  td_->updates_manager_->process_updates_users_and_chats(updates.get());
+
+  auto story = UpdatesManager::extract_story(updates.get(), pending_story->dialog_id_);
+  if (story == nullptr) {
+    LOG(ERROR) << "Receive unexpected edit story result: " << to_string(updates);
+    promise.set_error(400, "Failed to edit story");
+  } else {
+    auto story_id = on_get_story(pending_story->dialog_id_, std::move(story));
+    if (story_id != pending_story->story_id_) {
+      LOG(ERROR) << "Receive unexpected " << story_id << " instead of " << pending_story->story_id_;
+      promise.set_error(400, "Failed to edit story");
+    } else {
+      promise.set_value(get_story_object({pending_story->dialog_id_, story_id}));
+    }
+    on_delete_story({pending_story->dialog_id_, story_id});
+  }
+}
+
 void StoryManager::do_edit_story(unique_ptr<PendingStory> &&pending_story,
                                  telegram_api::object_ptr<telegram_api::InputFile> input_file) {
+  if (td_->auth_manager_->is_bot()) {
+    CHECK(pending_story->send_story_num_ != 0);
+    auto edited_story = being_edited_business_stories_[pending_story->send_story_num_].get();
+    CHECK(edited_story != nullptr);
+    td_->create_handler<EditBusinessStoryQuery>()->send(std::move(pending_story), std::move(input_file), edited_story);
+    return;
+  }
   StoryFullId story_full_id{pending_story->dialog_id_, pending_story->story_id_};
   const Story *story = get_story(story_full_id);
   auto it = being_edited_stories_.find(story_full_id);
@@ -5589,8 +6283,7 @@ void StoryManager::do_edit_story(unique_ptr<PendingStory> &&pending_story,
     td_->file_manager_->cancel_upload(pending_story->file_upload_id_);
     return;
   }
-  CHECK(story->content_ != nullptr);
-  td_->create_handler<EditStoryQuery>()->send(story, std::move(pending_story), std::move(input_file), it->second.get());
+  td_->create_handler<EditStoryQuery>()->send(std::move(pending_story), std::move(input_file), it->second.get());
 }
 
 void StoryManager::edit_story_cover(DialogId owner_dialog_id, StoryId story_id, double main_frame_timestamp,
@@ -5599,23 +6292,23 @@ void StoryManager::edit_story_cover(DialogId owner_dialog_id, StoryId story_id, 
   StoryFullId story_full_id{owner_dialog_id, story_id};
   const Story *story = get_story(story_full_id);
   if (story == nullptr || story->content_ == nullptr) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (!can_edit_story(story_full_id, story)) {
-    return promise.set_error(Status::Error(400, "Story can't be edited"));
+    return promise.set_error(400, "Story can't be edited");
   }
   if (being_edited_stories_.count(story_full_id) > 0) {
-    return promise.set_error(Status::Error(400, "Story is being edited"));
+    return promise.set_error(400, "Story is being edited");
   }
   if (main_frame_timestamp < 0.0) {
-    return promise.set_error(Status::Error(400, "Wrong cover timestamp specified"));
+    return promise.set_error(400, "Wrong cover timestamp specified");
   }
   if (story->content_->get_type() != StoryContentType::Video) {
-    return promise.set_error(Status::Error(400, "Cover timestamp can't be edited for the story"));
+    return promise.set_error(400, "Cover timestamp can't be edited for the story");
   }
   auto input_media = get_story_content_document_input_media(td_, story->content_.get(), main_frame_timestamp);
   if (input_media == nullptr) {
-    return promise.set_error(Status::Error(400, "Can't edit story cover"));
+    return promise.set_error(400, "Can't edit story cover");
   }
 
   td_->create_handler<EditStoryCoverQuery>(std::move(promise))
@@ -5627,15 +6320,23 @@ void StoryManager::delete_pending_story(unique_ptr<PendingStory> &&pending_story
   if (G()->close_flag() && G()->use_message_database()) {
     return;
   }
+
+  CHECK(pending_story != nullptr);
   if (pending_story->file_upload_id_.is_valid()) {
     td_->file_manager_->delete_partial_remote_location(pending_story->file_upload_id_);
   }
-
-  CHECK(pending_story != nullptr);
   StoryFullId story_full_id{pending_story->dialog_id_, pending_story->story_id_};
   const Story *story = get_story(story_full_id);
   bool is_edit = pending_story->story_id_.is_server();
   if (is_edit) {
+    if (td_->auth_manager_->is_bot()) {
+      CHECK(status.is_error());
+      auto it = being_edited_business_stories_.find(pending_story->send_story_num_);
+      CHECK(it != being_edited_business_stories_.end());
+      it->second->promise_.set_error(std::move(status));
+      being_edited_business_stories_.erase(it);
+      return;
+    }
     auto it = being_edited_stories_.find(story_full_id);
     if (story == nullptr || it == being_edited_stories_.end() ||
         edit_generations_[story_full_id] != pending_story->random_id_) {
@@ -5672,9 +6373,9 @@ void StoryManager::delete_pending_story(unique_ptr<PendingStory> &&pending_story
                                       "delete_pending_story");
       send_closure(
           G()->td(), &Td::send_update,
-          td_api::make_object<td_api::updateStorySendFailed>(
+          td_api::make_object<td_api::updateStoryPostFailed>(
               std::move(story_object), td_api::make_object<td_api::error>(status.code(), status.message().str()),
-              get_can_send_story_result_object(status, true)));
+              get_can_post_story_result_object(status, true)));
     }
     auto it = yet_unsent_stories_.find(pending_story->dialog_id_);
     CHECK(it != yet_unsent_stories_.end());
@@ -5708,10 +6409,10 @@ void StoryManager::set_story_privacy_settings(StoryId story_id,
   StoryFullId story_full_id{owner_dialog_id, story_id};
   const Story *story = get_story(story_full_id);
   if (story == nullptr || story->content_ == nullptr) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (!can_edit_story(story_full_id, story)) {
-    return promise.set_error(Status::Error(400, "Story privacy settings can't be edited"));
+    return promise.set_error(400, "Story privacy settings can't be edited");
   }
   TRY_RESULT_PROMISE(promise, privacy_rules,
                      UserPrivacySettingRules::get_user_privacy_setting_rules(td_, std::move(settings)));
@@ -5724,10 +6425,10 @@ void StoryManager::toggle_story_is_pinned(DialogId owner_dialog_id, StoryId stor
   StoryFullId story_full_id{owner_dialog_id, story_id};
   const Story *story = get_story(story_full_id);
   if (story == nullptr || story->content_ == nullptr) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (!can_toggle_story_is_pinned(story_full_id, story)) {
-    return promise.set_error(Status::Error(400, "Story can't be pinned/unpinned"));
+    return promise.set_error(400, "Story can't be pinned/unpinned");
   }
   auto query_promise = PromiseCreator::lambda([actor_id = actor_id(this), story_full_id, is_pinned,
                                                promise = std::move(promise)](Result<Unit> &&result) mutable {
@@ -5754,20 +6455,20 @@ void StoryManager::delete_story(DialogId owner_dialog_id, StoryId story_id, Prom
   StoryFullId story_full_id{owner_dialog_id, story_id};
   const Story *story = get_story(story_full_id);
   if (story == nullptr) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (!can_delete_story(story_full_id, story)) {
-    return promise.set_error(Status::Error(400, "Story can't be deleted"));
+    return promise.set_error(400, "Story can't be deleted");
   }
   if (!story_id.is_server()) {
     auto file_upload_id_it = being_uploaded_file_upload_ids_.find(story_full_id);
     if (file_upload_id_it == being_uploaded_file_upload_ids_.end()) {
-      return promise.set_error(Status::Error(400, "Story upload has been already completed"));
+      return promise.set_error(400, "Story upload has been already completed");
     }
     auto file_upload_id = file_upload_id_it->second;
     auto random_id_it = being_sent_story_random_ids_.find(story_full_id);
     if (random_id_it == being_sent_story_random_ids_.end()) {
-      return promise.set_error(Status::Error(400, "Story not found"));
+      return promise.set_error(400, "Story not found");
     }
     int64 random_id = random_id_it->second;
     CHECK(random_id != 0);

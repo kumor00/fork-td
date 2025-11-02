@@ -7,12 +7,14 @@
 #pragma once
 
 #include "td/telegram/DialogId.h"
+#include "td/telegram/InputDialogId.h"
 #include "td/telegram/InputMessageText.h"
 #include "td/telegram/logevent/LogEvent.h"
 #include "td/telegram/MessageContentType.h"
 #include "td/telegram/MessageEffectId.h"
-#include "td/telegram/MessageId.h"
 #include "td/telegram/MessageInputReplyTo.h"
+#include "td/telegram/MessageTopic.h"
+#include "td/telegram/SavedMessagesTopicId.h"
 #include "td/telegram/td_api.h"
 #include "td/telegram/telegram_api.h"
 
@@ -23,6 +25,7 @@
 namespace td {
 
 class Dependencies;
+class SuggestedPost;
 class Td;
 
 enum class DraftMessageContentType : int32 { VideoNote, VoiceNote };
@@ -48,6 +51,7 @@ class DraftMessage {
   InputMessageText input_message_text_;
   unique_ptr<DraftMessageContent> local_content_;
   MessageEffectId message_effect_id_;
+  unique_ptr<SuggestedPost> suggested_post_;
 
   friend class SaveDraftMessageQuery;
 
@@ -76,7 +80,8 @@ class DraftMessage {
 
   td_api::object_ptr<td_api::draftMessage> get_draft_message_object(Td *td) const;
 
-  static Result<unique_ptr<DraftMessage>> get_draft_message(Td *td, DialogId dialog_id, MessageId top_thread_message_id,
+  static Result<unique_ptr<DraftMessage>> get_draft_message(Td *td, DialogId dialog_id,
+                                                            const MessageTopic &message_topic,
                                                             td_api::object_ptr<td_api::draftMessage> &&draft_message);
 
   template <class StorerT>
@@ -105,11 +110,14 @@ td_api::object_ptr<td_api::draftMessage> get_draft_message_object(Td *td,
 unique_ptr<DraftMessage> get_draft_message(Td *td,
                                            telegram_api::object_ptr<telegram_api::DraftMessage> &&draft_message_ptr);
 
-void save_draft_message(Td *td, DialogId dialog_id, const unique_ptr<DraftMessage> &draft_message,
-                        Promise<Unit> &&promise);
+void save_draft_message(Td *td, DialogId dialog_id, const MessageTopic &message_topic,
+                        const unique_ptr<DraftMessage> &draft_message, Promise<Unit> &&promise);
 
 void load_all_draft_messages(Td *td);
 
 void clear_all_draft_messages(Td *td, Promise<Unit> &&promise);
+
+vector<InputDialogId> get_draft_message_reply_input_dialog_ids(
+    const telegram_api::object_ptr<telegram_api::DraftMessage> &draft_message);
 
 }  // namespace td

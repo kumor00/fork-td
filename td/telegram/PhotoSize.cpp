@@ -11,6 +11,7 @@
 #include "td/telegram/Td.h"
 #include "td/telegram/telegram_api.h"
 
+#include "td/utils/algorithm.h"
 #include "td/utils/base64.h"
 #include "td/utils/HttpUrl.h"
 #include "td/utils/logging.h"
@@ -287,9 +288,7 @@ AnimationSize get_animation_size(Td *td, PhotoSizeSource source, int64 id, int64
   result.type = PhotoSizeType(type);
   result.dimensions = get_dimensions(size->w_, size->h_, "get_animation_size");
   result.size = size->size_;
-  if ((size->flags_ & telegram_api::videoSize::VIDEO_START_TS_MASK) != 0) {
-    result.main_frame_timestamp = size->video_start_ts_;
-  }
+  result.main_frame_timestamp = size->video_start_ts_;
 
   if (source.get_type("get_animation_size") == PhotoSizeSource::Type::Thumbnail) {
     source.thumbnail().thumbnail_type = result.type;
@@ -338,7 +337,7 @@ PhotoSize get_web_document_photo_size(FileManager *file_manager, FileType file_t
   }
 
   FileId file_id;
-  vector<tl_object_ptr<telegram_api::DocumentAttribute>> attributes;
+  vector<telegram_api::object_ptr<telegram_api::DocumentAttribute>> attributes;
   int32 size = 0;
   string mime_type;
   switch (web_document_ptr->get_id()) {
@@ -389,7 +388,7 @@ PhotoSize get_web_document_photo_size(FileManager *file_manager, FileType file_t
   for (auto &attribute : attributes) {
     switch (attribute->get_id()) {
       case telegram_api::documentAttributeImageSize::ID: {
-        auto image_size = move_tl_object_as<telegram_api::documentAttributeImageSize>(attribute);
+        auto image_size = telegram_api::move_object_as<telegram_api::documentAttributeImageSize>(attribute);
         dimensions = get_dimensions(image_size->w_, image_size->h_, "web documentAttributeImageSize");
         break;
       }
@@ -494,6 +493,35 @@ td_api::object_ptr<td_api::thumbnail> get_thumbnail_object(FileManager *file_man
   return td_api::make_object<td_api::thumbnail>(get_thumbnail_format_object(format), photo_size.dimensions.width,
                                                 photo_size.dimensions.height,
                                                 file_manager->get_file_object(photo_size.file_id));
+}
+
+td_api::object_ptr<td_api::photoSize> get_photo_size_object(FileManager *file_manager, const PhotoSize *photo_size) {
+  CHECK(photo_size != nullptr);
+  LOG_CHECK(photo_size->file_id.is_valid()) << *photo_size;
+  return td_api::make_object<td_api::photoSize>(
+      photo_size->type.type ? std::string(1, static_cast<char>(photo_size->type.type))
+                            : std::string(),  // TODO replace string type with integer type
+      file_manager->get_file_object(photo_size->file_id), photo_size->dimensions.width, photo_size->dimensions.height,
+      vector<int32>(photo_size->progressive_sizes));
+}
+
+vector<td_api::object_ptr<td_api::photoSize>> get_photo_sizes_object(FileManager *file_manager,
+                                                                     const vector<PhotoSize> &photo_sizes) {
+  auto sizes = transform(photo_sizes, [file_manager](const PhotoSize &photo_size) {
+    return get_photo_size_object(file_manager, &photo_size);
+  });
+  std::stable_sort(sizes.begin(), sizes.end(), [](const auto &lhs, const auto &rhs) {
+    if (lhs->photo_->expected_size_ != rhs->photo_->expected_size_) {
+      return lhs->photo_->expected_size_ < rhs->photo_->expected_size_;
+    }
+    return static_cast<uint32>(lhs->width_) * static_cast<uint32>(lhs->height_) <
+           static_cast<uint32>(rhs->width_) * static_cast<uint32>(rhs->height_);
+  });
+  td::remove_if(sizes, [](const auto &size) {
+    return !size->photo_->local_->can_be_downloaded_ && !size->photo_->local_->is_downloading_active_ &&
+           !size->photo_->local_->is_downloading_completed_;
+  });
+  return sizes;
 }
 
 bool operator==(const PhotoSize &lhs, const PhotoSize &rhs) {
