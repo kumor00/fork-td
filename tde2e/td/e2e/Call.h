@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -35,7 +35,7 @@ struct CallVerificationChain {
     Reveal,
   };
   State get_state() const;
-  void on_new_main_block(const Blockchain &blockhain);
+  void on_new_main_block(const Blockchain &blockchain);
   td::Status try_apply_block(td::Slice message);
   std::string to_short_string(e2e::object_ptr<e2e::e2e_chain_GroupBroadcast> &broadcast);
 
@@ -139,7 +139,7 @@ class CallEncryption {
 class CallVerification {
  public:
   static CallVerification create(td::int64 user_id, PrivateKey private_key, const Blockchain &blockchain);
-  void on_new_main_block(const Blockchain &blockhain);
+  void on_new_main_block(const Blockchain &blockchain);
   CallVerificationState get_verification_state() const;
   std::vector<std::string> pull_outbound_messages();
   CallVerificationWords get_verification_words() const;

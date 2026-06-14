@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -338,7 +338,8 @@ class UploadFile : public Task {
     send_query(td::make_tl_object<td::td_api::sendMessage>(
                    chat_id_, nullptr, nullptr, nullptr, nullptr,
                    td::make_tl_object<td::td_api::inputMessageDocument>(
-                       td::make_tl_object<td::td_api::inputFileLocal>(content_path_), nullptr, true,
+                       td::td_api::make_object<td::td_api::inputDocument>(
+                           td::make_tl_object<td::td_api::inputFileLocal>(content_path_), nullptr, true),
                        td::make_tl_object<td::td_api::formattedText>("tag", td::Auto()))),
                [this](td::Result<td::td_api::object_ptr<td::td_api::message>> res) { with_message(res.move_as_ok()); });
   }
@@ -436,7 +437,7 @@ class TestDownloadFile : public Task {
       begin = end;
     }
 
-    rand_shuffle(as_mutable_span(ranges_), rnd);
+    td::Random::shuffle(as_mutable_span(ranges_), rnd);
     start_chunk();
   }
 

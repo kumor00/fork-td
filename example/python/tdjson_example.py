@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com),
-# Pellegrino Prevete (pellegrinoprevete@gmail.com)  2014-2025
+# Pellegrino Prevete (pellegrinoprevete@gmail.com)  2014-2026
 #
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -89,7 +89,8 @@ class TdExample:
             if verbosity_level == 0:
                 sys.exit(f"TDLib fatal error: {message.decode('utf-8')}")
 
-        self._td_set_log_message_callback(2, on_log_message_callback)
+        self._log_message_callback = on_log_message_callback
+        self._td_set_log_message_callback(2, self._log_message_callback)
         self.execute(
             {"@type": "setLogVerbosityLevel", "new_verbosity_level": verbosity_level}
         )

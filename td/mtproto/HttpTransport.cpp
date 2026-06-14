@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -24,7 +24,7 @@ namespace td {
 namespace mtproto {
 namespace http {
 
-Result<size_t> Transport::read_next(BufferSlice *message, uint32 *quick_ack) {
+Result<size_t> Transport::read_next(BufferSlice *message, uint32 *quick_ack, int32 *error_code) {
   CHECK(can_read());
   auto r_size = reader_.read_next(&http_query_);
   if (r_size.is_error() || r_size.ok() != 0) {
@@ -37,6 +37,7 @@ Result<size_t> Transport::read_next(BufferSlice *message, uint32 *quick_ack) {
     return Status::Error("Wrong response");
   }
   *message = std::move(http_query_.container_[1]);
+  *error_code = http_query_.code_;
   turn_ = Write;
   return 0;
 }

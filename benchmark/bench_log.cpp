@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -26,7 +26,7 @@ std::string create_tmp_file() {
   char file_name[] = "largefileXXXXXX";
   int fd = mkstemp(file_name);
   if (fd == -1) {
-    perror("Can't cretate temporary file");
+    perror("Can't create temporary file");
   }
   CHECK(fd != -1);
 

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -142,7 +142,7 @@ void ObfuscatedTransport::init(ChainBufferReader *input, ChainBufferWriter *outp
   MutableSlice(header_).substr(56).copy_from(header_slice.substr(56));
 }
 
-Result<size_t> ObfuscatedTransport::read_next(BufferSlice *message, uint32 *quick_ack) {
+Result<size_t> ObfuscatedTransport::read_next(BufferSlice *message, uint32 *quick_ack, int32 *error_code) {
   if (secret_.emulate_tls()) {
     tls_reader_byte_flow_.wakeup();
   } else {

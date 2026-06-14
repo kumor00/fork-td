@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -34,12 +34,11 @@ class ToDoList {
 
   friend bool operator==(const ToDoList &lhs, const ToDoList &rhs);
 
-  static bool remove_unsupported_entities(FormattedText &text);
-
  public:
   ToDoList() = default;
 
-  ToDoList(const UserManager *user_manager, telegram_api::object_ptr<telegram_api::todoList> &&list);
+  ToDoList(const UserManager *user_manager, telegram_api::object_ptr<telegram_api::todoList> &&list,
+           int32 message_date);
 
   static Result<ToDoList> get_to_do_list(const Td *td, DialogId dialog_id,
                                          td_api::object_ptr<td_api::inputChecklist> &&list);
@@ -58,7 +57,7 @@ class ToDoList {
 
   td_api::object_ptr<td_api::checklist> get_checklist_object(Td *td, const vector<ToDoCompletion> &completions,
                                                              DialogId dialog_id, MessageId message_id, bool is_outgoing,
-                                                             bool is_forward) const;
+                                                             bool is_forward, bool is_real_message_content) const;
 
   telegram_api::object_ptr<telegram_api::inputMediaTodo> get_input_media_todo(const UserManager *user_manager) const;
 

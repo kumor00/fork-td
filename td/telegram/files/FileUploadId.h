@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -35,6 +35,8 @@ class FileUploadId {
   int64 get_internal_upload_id() const {
     return internal_upload_id_;
   }
+
+  static vector<FileUploadId> get_file_upload_ids(const vector<FileId> &file_ids);
 
   bool operator==(const FileUploadId &other) const {
     return file_id_ == other.file_id_ && internal_upload_id_ == other.internal_upload_id_;

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -11,6 +11,7 @@
 // To close queue, one should send as much sentinel elements as there are readers.
 // Once there are no readers and writers, one may easily destroy queue
 
+#include "td/utils/common.h"
 #include "td/utils/format.h"
 #include "td/utils/HazardPointers.h"
 #include "td/utils/logging.h"

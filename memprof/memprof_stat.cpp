@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -55,8 +55,8 @@ static constexpr std::size_t RESERVED_SIZE = 16;
 static constexpr std::int32_t MALLOC_INFO_MAGIC = 0x27138373;
 
 static void *do_malloc(std::size_t size) {
-  static_assert(RESERVED_SIZE % alignof(std::max_align_t) == 0, "fail");
-  static_assert(RESERVED_SIZE >= sizeof(malloc_info), "fail");
+  static_assert(RESERVED_SIZE % alignof(std::max_align_t) == 0);
+  static_assert(RESERVED_SIZE >= sizeof(malloc_info));
 #if TD_DARWIN
   static void *malloc_void = dlsym(RTLD_NEXT, "malloc");
   static auto malloc_old = *reinterpret_cast<decltype(malloc) **>(&malloc_void);

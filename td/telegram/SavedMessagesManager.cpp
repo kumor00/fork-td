@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -263,7 +263,7 @@ class GetSavedMessageByDateQuery final : public Td::ResultHandler {
       auto message_date = MessagesManager::get_message_date(message);
       if (message_date != 0 && message_date <= date_) {
         auto message_full_id = td_->messages_manager_->on_get_message(dialog_id_, std::move(message), false, false,
-                                                                      false, "GetSavedMessageByDateQuery");
+                                                                      "GetSavedMessageByDateQuery");
         if (message_full_id != MessageFullId()) {
           // TODO check message topic_id
           return promise_.set_value(
@@ -536,8 +536,7 @@ class GetMessageAuthorQuery final : public Td::ResultHandler {
 
     auto ptr = result_ptr.move_as_ok();
     LOG(INFO) << "Receive result for GetMessageAuthorQuery: " << to_string(ptr);
-    auto user_id = UserManager::get_user_id(ptr);
-    td_->user_manager_->on_get_user(std::move(ptr), "GetMessageAuthorQuery");
+    auto user_id = td_->user_manager_->on_get_user(std::move(ptr), "GetMessageAuthorQuery");
     promise_.set_value(td_->user_manager_->get_user_object(user_id));
   }
 
@@ -1292,6 +1291,28 @@ void SavedMessagesManager::on_topic_reaction_count_changed(DialogId dialog_id,
   on_topic_changed(topic_list, topic, "on_topic_reaction_count_changed");
 }
 
+void SavedMessagesManager::repair_topic_unread_reaction_count(DialogId dialog_id,
+                                                              SavedMessagesTopicId saved_messages_topic_id) {
+  if (td_->auth_manager_->is_bot()) {
+    return;
+  }
+
+  auto *topic_list = get_topic_list(dialog_id);
+  if (topic_list == nullptr) {
+    return;
+  }
+  auto *topic = get_topic(topic_list, saved_messages_topic_id);
+  if (topic == nullptr) {
+    return;
+  }
+  if (topic->dialog_id_ != dialog_id) {
+    LOG(ERROR) << "Saves Messages must not have unread reactions";
+    return;
+  }
+
+  repair_topic_unread_count(topic);
+}
+
 int64 SavedMessagesManager::get_topic_order(int32 message_date, MessageId message_id) {
   return (static_cast<int64>(message_date) << 31) +
          message_id.get_prev_server_message_id().get_server_message_id().get();
@@ -1686,7 +1707,7 @@ void SavedMessagesManager::process_saved_messages_topics(
       }
       auto message_full_id = td_->messages_manager_->on_get_message(
           is_saved_messages ? td_->dialog_manager_->get_my_dialog_id() : dialog_id, std::move(it->second), false, false,
-          false, "on_get_saved_messages_topics");
+          "on_get_saved_messages_topics");
       message_id_to_message.erase(it);
 
       auto message_id = message_full_id.get_message_id();
@@ -2205,8 +2226,8 @@ void SavedMessagesManager::on_get_topic_history(DialogId dialog_id, uint32 gener
   bool have_next = false;
   for (auto &message : info.messages) {
     auto message_date = MessagesManager::get_message_date(message);
-    auto message_full_id = td_->messages_manager_->on_get_message(dialog_id, std::move(message), false, false, false,
-                                                                  "on_get_topic_history");
+    auto message_full_id =
+        td_->messages_manager_->on_get_message(dialog_id, std::move(message), false, false, "on_get_topic_history");
     auto message_id = message_full_id.get_message_id();
     if (message_id == MessageId()) {
       info.total_count--;
@@ -2317,7 +2338,7 @@ void SavedMessagesManager::delete_topic_messages_by_date(DialogId dialog_id,
                                                          int32 max_date, Promise<Unit> &&promise) {
   TRY_STATUS_PROMISE(promise, saved_messages_topic_id.is_valid_in(td_, dialog_id));
 
-  TRY_STATUS_PROMISE(promise, MessagesManager::fix_delete_message_min_max_dates(min_date, max_date));
+  TRY_STATUS_PROMISE(promise, MessageQueryManager::fix_delete_message_min_max_dates(min_date, max_date));
   if (max_date == 0) {
     return promise.set_value(Unit());
   }
@@ -2490,9 +2511,9 @@ void SavedMessagesManager::read_all_monoforum_topic_reactions(DialogId dialog_id
     return promise.set_error(400, "Topic messages can't have reactions");
   }
 
+  do_set_topic_unread_reaction_count(topic, 0);
   td_->messages_manager_->read_all_local_dialog_reactions(dialog_id, ForumTopicId(), saved_messages_topic_id);
 
-  do_set_topic_unread_reaction_count(topic, 0);
   if (!topic->is_changed_) {
     return promise.set_value(Unit());
   }

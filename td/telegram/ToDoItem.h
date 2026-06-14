@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -32,12 +32,13 @@ class ToDoItem {
  public:
   ToDoItem() = default;
 
-  ToDoItem(const UserManager *user_manager, telegram_api::object_ptr<telegram_api::todoItem> &&item);
+  ToDoItem(const UserManager *user_manager, telegram_api::object_ptr<telegram_api::todoItem> &&item,
+           int32 message_date);
 
   static Result<ToDoItem> get_to_do_item(const Td *td, DialogId dialog_id,
                                          td_api::object_ptr<td_api::inputChecklistTask> &&task);
 
-  void validate(const char *source);
+  void validate(int32 message_date, const char *source);
 
   const string &get_search_text() const {
     return title_.text;

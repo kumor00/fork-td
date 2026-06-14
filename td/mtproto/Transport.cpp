@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -415,7 +415,11 @@ Result<uint64> Transport::read_auth_key_id(Slice message) {
   return as<uint64>(message.begin());
 }
 
-Result<Transport::ReadResult> Transport::read(MutableSlice message, const AuthKey &auth_key, PacketInfo *packet_info) {
+Result<Transport::ReadResult> Transport::read(MutableSlice message, int32 error_code, const AuthKey &auth_key,
+                                              PacketInfo *packet_info) {
+  if (error_code >= 300) {
+    return ReadResult::make_error(-error_code);
+  }
   if (message.size() < 16) {
     if (message.size() < 4) {
       return Status::Error(PSLICE() << "Invalid MTProto message: smaller than 4 bytes [size = " << message.size()

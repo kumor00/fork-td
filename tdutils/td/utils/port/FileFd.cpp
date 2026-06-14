@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -17,6 +17,7 @@
 #include "td/utils/FlatHashSet.h"
 #include "td/utils/logging.h"
 #include "td/utils/misc.h"
+#include "td/utils/port/config.h"
 #include "td/utils/port/detail/PollableFd.h"
 #include "td/utils/port/detail/skip_eintr.h"
 #include "td/utils/port/PollFlags.h"
@@ -168,7 +169,7 @@ Result<FileFd> FileFd::open(CSlice filepath, int32 flags, int32 mode) {
     if (native_fd < MINIMUM_FILE_DESCRIPTOR) {
       ::close(native_fd);
       LOG(ERROR) << "Receive " << native_fd << " as a file descriptor";
-      int dummy_fd = detail::skip_eintr([&] { return ::open("/dev/null", O_RDONLY, 0); });
+      int dummy_fd = detail::skip_eintr([] { return ::open("/dev/null", O_RDONLY, 0); });
       if (dummy_fd < 0) {
         return OS_ERROR("Can't open /dev/null");
       }

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -29,26 +29,9 @@ class UserId {
   template <class T, typename = std::enable_if_t<std::is_convertible<T, int64>::value>>
   UserId(T user_id) = delete;
 
-  static vector<UserId> get_user_ids(const vector<int64> &input_user_ids, bool only_valid = false) {
-    vector<UserId> user_ids;
-    user_ids.reserve(input_user_ids.size());
-    for (auto &input_user_id : input_user_ids) {
-      UserId user_id(input_user_id);
-      if (!only_valid || user_id.is_valid()) {
-        user_ids.emplace_back(user_id);
-      }
-    }
-    return user_ids;
-  }
+  static vector<UserId> get_user_ids(const vector<int64> &input_user_ids, bool only_valid = false);
 
-  static vector<int64> get_input_user_ids(const vector<UserId> &user_ids) {
-    vector<int64> input_user_ids;
-    input_user_ids.reserve(user_ids.size());
-    for (auto &user_id : user_ids) {
-      input_user_ids.emplace_back(user_id.get());
-    }
-    return input_user_ids;
-  }
+  static vector<int64> get_input_user_ids(const vector<UserId> &user_ids);
 
   bool is_valid() const {
     return 0 < id && id <= MAX_USER_ID;

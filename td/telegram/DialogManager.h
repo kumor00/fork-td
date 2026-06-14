@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -32,6 +32,7 @@
 #include "td/utils/common.h"
 #include "td/utils/FlatHashMap.h"
 #include "td/utils/FlatHashSet.h"
+#include "td/utils/Hints.h"
 #include "td/utils/Promise.h"
 #include "td/utils/Status.h"
 #include "td/utils/WaitFreeHashMap.h"
@@ -84,6 +85,8 @@ class DialogManager final : public Actor {
 
   bool have_input_peer(DialogId dialog_id, bool allow_secret_chats, AccessRights access_rights) const;
 
+  Status can_send_message_to_dialog(DialogId dialog_id) const;
+
   bool have_dialog_force(DialogId dialog_id, const char *source) const;
 
   void force_create_dialog(DialogId dialog_id, const char *source, bool expect_no_access = false,
@@ -132,8 +135,9 @@ class DialogManager final : public Actor {
 
   void clear_recently_found_dialogs();
 
-  std::pair<int32, vector<DialogId>> search_recently_found_dialogs(const string &query, int32 limit,
-                                                                   Promise<Unit> &&promise);
+  std::pair<int32, vector<DialogId>> search_recently_found_dialogs(
+      const string &query, const td_api::object_ptr<td_api::SearchChatTypeFilter> &chat_type_filter, int32 limit,
+      Promise<Unit> &&promise);
 
   std::pair<int32, vector<DialogId>> get_recently_opened_dialogs(int32 limit, Promise<Unit> &&promise);
 
@@ -171,6 +175,10 @@ class DialogManager final : public Actor {
 
   CustomEmojiId get_dialog_profile_background_custom_emoji_id(DialogId dialog_id) const;
 
+  DialogParticipantStatus get_dialog_status(DialogId dialog_id) const;
+
+  DialogParticipantStatus get_dialog_permissions(DialogId dialog_id) const;
+
   RestrictedRights get_dialog_default_permissions(DialogId dialog_id) const;
 
   td_api::object_ptr<td_api::emojiStatus> get_dialog_emoji_status_object(DialogId dialog_id) const;
@@ -178,6 +186,8 @@ class DialogManager final : public Actor {
   string get_dialog_about(DialogId dialog_id);
 
   string get_dialog_search_text(DialogId dialog_id) const;
+
+  bool get_dialog_has_protected_content_force(DialogId dialog_id);
 
   bool get_dialog_has_protected_content(DialogId dialog_id) const;
 
@@ -200,7 +210,8 @@ class DialogManager final : public Actor {
   void set_dialog_emoji_status(DialogId dialog_id, const unique_ptr<EmojiStatus> &emoji_status,
                                Promise<Unit> &&promise);
 
-  void toggle_dialog_has_protected_content(DialogId dialog_id, bool has_protected_content, Promise<Unit> &&promise);
+  void toggle_dialog_has_protected_content(DialogId dialog_id, MessageId request_message_id, bool is_request,
+                                           bool has_protected_content, Promise<Unit> &&promise);
 
   void set_dialog_description(DialogId dialog_id, const string &description, Promise<Unit> &&promise);
 
@@ -214,6 +225,8 @@ class DialogManager final : public Actor {
                      const string &text, Promise<td_api::object_ptr<td_api::ReportChatResult>> &&promise);
 
   void report_dialog_photo(DialogId dialog_id, FileId file_id, ReportReason &&reason, Promise<Unit> &&promise);
+
+  Status can_delete_all_dialog_messages_by_sender(DialogId dialog_id) const;
 
   Status can_pin_messages(DialogId dialog_id) const;
 
@@ -240,7 +253,8 @@ class DialogManager final : public Actor {
     PublicDialogsTooMany,
     PublicGroupsUnavailable
   };
-  void check_dialog_username(DialogId dialog_id, const string &username, Promise<CheckDialogUsernameResult> &&promise);
+  void check_dialog_username(DialogId dialog_id, const string &username, bool is_bot,
+                             Promise<CheckDialogUsernameResult> &&promise);
 
   static td_api::object_ptr<td_api::CheckChatUsernameResult> get_check_chat_username_result_object(
       CheckDialogUsernameResult result);
@@ -253,15 +267,29 @@ class DialogManager final : public Actor {
 
   DialogId search_public_dialog(const string &username_to_search, bool force, Promise<Unit> &&promise);
 
-  void on_get_public_dialogs_search_result(const string &query,
+  enum class DialogTypeFilter : int32 { None, Bot, Broadcast };
+
+  void add_dialog_to_hints(DialogId dialog_id);
+
+  void update_dialog_hints_rating(DialogId dialog_id, int64 rating);
+
+  std::pair<int32, vector<DialogId>> search_dialogs(
+      const string &query, const td_api::object_ptr<td_api::SearchChatTypeFilter> &chat_type_filter, int32 limit,
+      Promise<Unit> &&promise);
+
+  void on_get_public_dialogs_search_result(const string &query, DialogTypeFilter type_filter,
                                            vector<telegram_api::object_ptr<telegram_api::Peer>> &&my_peers,
                                            vector<telegram_api::object_ptr<telegram_api::Peer>> &&peers);
 
-  void on_failed_public_dialogs_search(const string &query, Status &&error);
+  void on_failed_public_dialogs_search(const string &query, DialogTypeFilter type_filter, Status &&error);
 
-  vector<DialogId> search_public_dialogs(const string &query, Promise<Unit> &&promise);
+  vector<DialogId> search_public_dialogs(const string &query,
+                                         const td_api::object_ptr<td_api::SearchChatTypeFilter> &chat_type_filter,
+                                         Promise<Unit> &&promise);
 
-  vector<DialogId> search_dialogs_on_server(const string &query, int32 limit, Promise<Unit> &&promise);
+  vector<DialogId> search_dialogs_on_server(const string &query,
+                                            const td_api::object_ptr<td_api::SearchChatTypeFilter> &chat_type_filter,
+                                            int32 limit, Promise<Unit> &&promise);
 
   void reload_video_chat_on_search(const string &username);
 
@@ -335,7 +363,11 @@ class DialogManager final : public Actor {
 
   void on_resolve_dialog(const string &username, ChannelId channel_id, Promise<DialogId> &&promise);
 
-  void send_search_public_dialogs_query(const string &query, Promise<Unit> &&promise);
+  static DialogTypeFilter get_dialog_type_filter(const td_api::object_ptr<td_api::SearchChatTypeFilter> &type_filter);
+
+  void send_search_public_dialogs_query(const string &query, DialogTypeFilter type_filter, Promise<Unit> &&promise);
+
+  bool is_dialog_suitable_for_type_filter(DialogId dialog_id, DialogTypeFilter type_filter) const;
 
   static uint64 save_reorder_pinned_dialogs_on_server_log_event(FolderId folder_id, const vector<DialogId> &dialog_ids);
 
@@ -395,9 +427,11 @@ class DialogManager final : public Actor {
 
   FlatHashMap<string, vector<Promise<Unit>>> resolve_dialog_username_queries_;
 
-  FlatHashMap<string, vector<Promise<Unit>>> search_public_dialogs_queries_;
-  FlatHashMap<string, vector<DialogId>> found_public_dialogs_;     // TODO time bound cache
-  FlatHashMap<string, vector<DialogId>> found_on_server_dialogs_;  // TODO time bound cache
+  FlatHashMap<string, vector<Promise<Unit>>> search_public_dialogs_queries_[3];
+  FlatHashMap<string, vector<DialogId>> found_public_dialogs_[3];     // TODO time bound cache
+  FlatHashMap<string, vector<DialogId>> found_on_server_dialogs_[3];  // TODO time bound cache
+
+  Hints dialog_hints_;  // search dialogs by title and usernames
 
   RecentDialogList recently_found_dialogs_;
   RecentDialogList recently_opened_dialogs_;

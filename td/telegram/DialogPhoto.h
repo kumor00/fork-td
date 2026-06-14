@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -71,5 +71,13 @@ tl_object_ptr<td_api::chatPhoto> get_chat_photo_object(FileManager *file_manager
 
 telegram_api::object_ptr<telegram_api::userProfilePhoto> convert_photo_to_profile_photo(
     const telegram_api::object_ptr<telegram_api::photo> &photo, bool is_personal);
+
+bool operator==(const DialogPhoto &lhs, const DialogPhoto &rhs);
+
+bool operator!=(const DialogPhoto &lhs, const DialogPhoto &rhs);
+
+bool operator==(const ProfilePhoto &lhs, const ProfilePhoto &rhs);
+
+bool operator!=(const ProfilePhoto &lhs, const ProfilePhoto &rhs);
 
 }  // namespace td

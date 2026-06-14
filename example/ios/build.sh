@@ -55,7 +55,7 @@ do
       fi
 
       echo "iOS platform = ${ios_platform}"
-      other_options="-DIOS_PLATFORM=${ios_platform} -DCMAKE_TOOLCHAIN_FILE=${td_path}/CMake/iOS.cmake -DCMAKE_MAKE_PROGRAM=make"
+      other_options="-DIOS_PLATFORM=${ios_platform} -DCMAKE_TOOLCHAIN_FILE=${td_path}/CMake/iOS.cmake"
     fi
 
     set_cmake_options $platform
@@ -66,7 +66,7 @@ do
     mkdir -p $install
     cd $build
     cmake $td_path $options $other_options -DCMAKE_INSTALL_PREFIX=../${install}
-    make -j3 install || exit
+    ZERO_AR_DATE=1 make -j3 install || exit
     cd ..
     install_name_tool -id @rpath/libtdjson.dylib ${install}/lib/libtdjson.dylib
     mkdir -p ../tdjson/${platform}/include

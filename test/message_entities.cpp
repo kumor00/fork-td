@@ -1,10 +1,11 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 #include "td/telegram/CustomEmojiId.h"
+#include "td/telegram/FormattedDate.h"
 #include "td/telegram/MessageEntity.h"
 #include "td/telegram/UserId.h"
 
@@ -743,16 +744,18 @@ static void check_fix_formatted_text(td::string str, td::vector<td::MessageEntit
                                      const td::vector<td::MessageEntity> &expected_entities, bool allow_empty = true,
                                      bool skip_new_entities = false, bool skip_bot_commands = false,
                                      bool skip_trim = true) {
-  ASSERT_TRUE(td::fix_formatted_text(str, entities, allow_empty, skip_new_entities, skip_bot_commands, true, skip_trim)
-                  .is_ok());
+  ASSERT_TRUE(
+      td::fix_formatted_text(str, entities, allow_empty, false, skip_new_entities, skip_bot_commands, true, skip_trim)
+          .is_ok());
   ASSERT_STREQ(expected_str, str);
   ASSERT_EQ(expected_entities, entities);
 }
 
 static void check_fix_formatted_text(td::string str, td::vector<td::MessageEntity> entities, bool allow_empty,
                                      bool skip_new_entities, bool skip_bot_commands, bool skip_trim) {
-  ASSERT_TRUE(td::fix_formatted_text(str, entities, allow_empty, skip_new_entities, skip_bot_commands, true, skip_trim)
-                  .is_error());
+  ASSERT_TRUE(
+      td::fix_formatted_text(str, entities, allow_empty, false, skip_new_entities, skip_bot_commands, true, skip_trim)
+          .is_error());
 }
 
 TEST(MessageEntities, fix_formatted_text) {
@@ -1155,7 +1158,7 @@ TEST(MessageEntities, fix_formatted_text) {
       return result;
     };
     auto old_type_mask = get_type_mask(str.size(), entities);
-    ASSERT_TRUE(td::fix_formatted_text(str, entities, false, false, true, true, false).is_ok());
+    ASSERT_TRUE(td::fix_formatted_text(str, entities, false, false, false, true, true, false).is_ok());
     auto new_type_mask = get_type_mask(str.size(), entities);
     auto splittable_mask = (1 << 5) | (1 << 6) | (1 << 14) | (1 << 15) | (1 << 19);
     auto pre_mask = (1 << 7) | (1 << 8) | (1 << 9);
@@ -1234,7 +1237,7 @@ TEST(MessageEntities, is_visible_url) {
   td::vector<td::MessageEntity> entities;
   entities.emplace_back(td::MessageEntity::Type::TextUrl, 0, 1, "telegrab.org");
   entities.emplace_back(td::MessageEntity::Type::TextUrl, static_cast<td::int32>(str.size()) - 1, 1, "telegrax.org");
-  td::fix_formatted_text(str, entities, false, false, false, false, true).ensure();
+  td::fix_formatted_text(str, entities, false, false, false, false, false, true).ensure();
   td::FormattedText text{std::move(str), std::move(entities)};
   ASSERT_EQ(td::get_first_url(text), "telegrab.org");
   ASSERT_TRUE(!td::is_visible_url(text, "telegrab.org"));
@@ -1379,6 +1382,32 @@ TEST(MessageEntities, parse_html) {
   check_parse_html("🏟 🏟<b aba   =   caba><tg-emoji emoji-id=\"1\">🏟</tg-emoji>1</b>", "🏟 🏟🏟1",
                    {{td::MessageEntity::Type::Bold, 5, 3},
                     {td::MessageEntity::Type::CustomEmoji, 5, 2, td::CustomEmojiId(static_cast<td::int64>(1))}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"r\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "➡️ ➡️➡️ ➡️➡️ ➡️",
+                   {{td::MessageEntity::Type::FormattedDate, 5, 5, td::FormattedDate{12345, 1}},
+                    {td::MessageEntity::Type::Bold, 10, 5}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"t\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "➡️ ➡️➡️ ➡️➡️ ➡️",
+                   {{td::MessageEntity::Type::FormattedDate, 5, 5, td::FormattedDate{12345, 2}},
+                    {td::MessageEntity::Type::Bold, 10, 5}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"T\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "➡️ ➡️➡️ ➡️➡️ ➡️",
+                   {{td::MessageEntity::Type::FormattedDate, 5, 5, td::FormattedDate{12345, 4}},
+                    {td::MessageEntity::Type::Bold, 10, 5}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"d\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "➡️ ➡️➡️ ➡️➡️ ➡️",
+                   {{td::MessageEntity::Type::FormattedDate, 5, 5, td::FormattedDate{12345, 8}},
+                    {td::MessageEntity::Type::Bold, 10, 5}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"D\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "➡️ ➡️➡️ ➡️➡️ ➡️",
+                   {{td::MessageEntity::Type::FormattedDate, 5, 5, td::FormattedDate{12345, 16}},
+                    {td::MessageEntity::Type::Bold, 10, 5}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"w\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "➡️ ➡️➡️ ➡️➡️ ➡️",
+                   {{td::MessageEntity::Type::FormattedDate, 5, 5, td::FormattedDate{12345, 32}},
+                    {td::MessageEntity::Type::Bold, 10, 5}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"W\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "➡️ ➡️➡️ ➡️➡️ ➡️",
+                   {{td::MessageEntity::Type::FormattedDate, 5, 5, td::FormattedDate{12345, 32}},
+                    {td::MessageEntity::Type::Bold, 10, 5}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"tttTTdDwW\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "➡️ ➡️➡️ ➡️➡️ ➡️",
+                   {{td::MessageEntity::Type::FormattedDate, 5, 5, td::FormattedDate{12345, 62}},
+                    {td::MessageEntity::Type::Bold, 10, 5}});
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"rt\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "Invalid date format used");
+  check_parse_html("➡️ ➡️<tg-time unix = \"12345\", format = \"ts\">➡️ ➡️</tg-time><b>➡️ ➡️</b>", "Invalid date format used");
   check_parse_html("<blockquote   cite=\"\" askdlbas nasjdbaj nj12b3>a&lt;<pre  >b;</></>", "a<b;",
                    {{td::MessageEntity::Type::BlockQuote, 0, 4}, {td::MessageEntity::Type::Pre, 2, 2}});
   check_parse_html("<blockquote   expandable>a&lt;<pre  >b;</></>", "a<b;",
@@ -1449,13 +1478,19 @@ TEST(MessageEntities, parse_markdown) {
   check_parse_markdown("🏟 🏟>", "Character '>' is reserved and must be escaped with the preceding '\\'");
   check_parse_markdown("🏟 🏟![", "Can't find end of CustomEmoji entity at byte offset 9");
   check_parse_markdown("🏟 🏟![👍", "Can't find end of CustomEmoji entity at byte offset 9");
-  check_parse_markdown("🏟 🏟![👍]", "Custom emoji entity must contain a tg://emoji URL");
-  check_parse_markdown("🏟 🏟![👍](tg://emoji?id=1234", "Can't find end of a custom emoji URL at byte offset 17");
-  check_parse_markdown("🏟 🏟![👍](t://emoji?id=1234)", "Custom emoji URL must have scheme tg");
-  check_parse_markdown("🏟 🏟![👍](tg:emojis?id=1234)", "Custom emoji URL must have host \"emoji\"");
-  check_parse_markdown("🏟 🏟![👍](tg://emoji#test)", "Custom emoji URL must have an emoji identifier");
-  check_parse_markdown("🏟 🏟![👍](tg://emoji?test=1#&id=25)", "Custom emoji URL must have an emoji identifier");
-  check_parse_markdown("🏟 🏟![👍](tg://emoji?test=1231&id=025)", "Invalid custom emoji identifier specified");
+  check_parse_markdown("🏟 🏟![👍]", "The entity must contain a tg://emoji or tg://time URL");
+  check_parse_markdown("🏟 🏟![👍](tg://emoji?id=1234", "Can't find end of a URL at byte offset 17");
+  check_parse_markdown("🏟 🏟![👍](t://emoji?id=1234)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg:emojis?id=1234)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg://emoji#test)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg://emoji?test=1#&id=25)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg://emoji?test=1231&id=025)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg://time?id=1234", "Can't find end of a URL at byte offset 17");
+  check_parse_markdown("🏟 🏟![👍](t://time?id=1234)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg:times?id=1234)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg://time#test)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg://time?test=1#&date=25)", "Invalid tg://emoji or tg://time URL specified");
+  check_parse_markdown("🏟 🏟![👍](tg://time?test=1231&date=025)", "Invalid tg://emoji or tg://time URL specified");
   check_parse_markdown(">*b\n>ld \n>bo\nld*\nasd\ndef", "Can't find end of Bold entity at byte offset 1");
   check_parse_markdown(">\n*a*>2", "Character '>' is reserved and must be escaped with the preceding '\\'");
   check_parse_markdown(">asd\n>q||e||w||\n||asdad", "Can't find end of Spoiler entity at byte offset 16");
@@ -1526,6 +1561,18 @@ TEST(MessageEntities, parse_markdown) {
                        {{0, 12, td::UserId(static_cast<td::int64>(123456))}});
   check_parse_markdown("🏟 🏟![👍](TG://EMoJI/?test=1231&id=25#id=32)a", "🏟 🏟👍a",
                        {{td::MessageEntity::Type::CustomEmoji, 5, 2, td::CustomEmojiId(static_cast<td::int64>(25))}});
+  check_parse_markdown("🏟 🏟![👍](TG://TiME/?test=1231&unix=25#unix=32)a", "🏟 🏟👍a",
+                       {{td::MessageEntity::Type::FormattedDate, 5, 2, td::FormattedDate{25, 0}}});
+  check_parse_markdown("🏟 🏟![👍](TG://TiME/?test=1231&format=R&unix=25#unix=32)a", "🏟 🏟👍a",
+                       {{td::MessageEntity::Type::FormattedDate, 5, 2, td::FormattedDate{25, 1}}});
+  check_parse_markdown("🏟 🏟![👍](TG://TiME/?test=1231&format=dt&unix=25#unix=32)a", "🏟 🏟👍a",
+                       {{td::MessageEntity::Type::FormattedDate, 5, 2, td::FormattedDate{25, 10}}});
+  check_parse_markdown("🏟 🏟![👍](TG://TiME/?test=1231&format=DT&unix=25#unix=32)a", "🏟 🏟👍a",
+                       {{td::MessageEntity::Type::FormattedDate, 5, 2, td::FormattedDate{25, 20}}});
+  check_parse_markdown("🏟 🏟![👍](TG://TiME/?test=1231&format=w&unix=25#unix=32)a", "🏟 🏟👍a",
+                       {{td::MessageEntity::Type::FormattedDate, 5, 2, td::FormattedDate{25, 32}}});
+  check_parse_markdown("🏟 🏟![👍](TG://TiME/?test=1231&format=Wt&unix=25#unix=32)a", "🏟 🏟👍a",
+                       {{td::MessageEntity::Type::FormattedDate, 5, 2, td::FormattedDate{25, 34}}});
   check_parse_markdown("> \n> \n>", " \n \n", {{td::MessageEntity::Type::BlockQuote, 0, 4}});
   check_parse_markdown("> \\>\n \\> \n>", " >\n > \n", {{td::MessageEntity::Type::BlockQuote, 0, 3}});
   check_parse_markdown("abc\n> \n> \n>\ndef", "abc\n \n \n\ndef", {{td::MessageEntity::Type::BlockQuote, 4, 5}});
@@ -1598,7 +1645,8 @@ static void check_parse_markdown_v3(td::string text, td::vector<td::MessageEntit
                                     bool fix = false) {
   auto parsed_text = td::parse_markdown_v3({std::move(text), std::move(entities)});
   if (fix) {
-    ASSERT_TRUE(td::fix_formatted_text(parsed_text.text, parsed_text.entities, true, true, true, true, true).is_ok());
+    ASSERT_TRUE(
+        td::fix_formatted_text(parsed_text.text, parsed_text.entities, true, true, true, true, true, true).is_ok());
   }
   ASSERT_STREQ(result_text, parsed_text.text);
   ASSERT_EQ(result_entities, parsed_text.entities);
@@ -1945,9 +1993,10 @@ TEST(MessageEntities, parse_markdown_v3) {
 
     td::FormattedText text{std::move(str), std::move(entities)};
     while (true) {
-      ASSERT_TRUE(td::fix_formatted_text(text.text, text.entities, true, true, true, true, true).is_ok());
+      ASSERT_TRUE(td::fix_formatted_text(text.text, text.entities, true, true, true, true, true, true).is_ok());
       auto parsed_text = td::parse_markdown_v3(text);
-      ASSERT_TRUE(td::fix_formatted_text(parsed_text.text, parsed_text.entities, true, true, true, true, true).is_ok());
+      ASSERT_TRUE(
+          td::fix_formatted_text(parsed_text.text, parsed_text.entities, true, true, true, true, true, true).is_ok());
       if (parsed_text == text) {
         break;
       }

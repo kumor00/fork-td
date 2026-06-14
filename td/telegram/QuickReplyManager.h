@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -259,7 +259,7 @@ class QuickReplyManager final : public Actor {
 
   int64 get_shortcuts_hash() const;
 
-  void on_reload_quick_reply_messages(QuickReplyShortcutId shortcut_id,
+  void on_reload_quick_reply_messages(QuickReplyShortcutId shortcut_id, const string &old_shortcut_name,
                                       Result<telegram_api::object_ptr<telegram_api::messages_Messages>> r_messages);
 
   static int64 get_quick_reply_messages_hash(const Shortcut *s);
@@ -373,10 +373,10 @@ class QuickReplyManager final : public Actor {
 
   void on_failed_send_quick_reply_messages(QuickReplyShortcutId shortcut_id, vector<int64> random_ids, Status error);
 
-  void update_sent_message_content_from_temporary_message(const QuickReplyMessage *old_message,
+  void update_sent_message_content_from_temporary_message(QuickReplyMessage *old_message,
                                                           QuickReplyMessage *new_message, bool is_edit);
 
-  void update_sent_message_content_from_temporary_message(const unique_ptr<MessageContent> &old_content,
+  void update_sent_message_content_from_temporary_message(unique_ptr<MessageContent> &old_content,
                                                           FileUploadId old_file_upload_id,
                                                           unique_ptr<MessageContent> &new_content,
                                                           bool need_merge_files);

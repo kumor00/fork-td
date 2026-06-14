@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -28,8 +28,8 @@ class InlineMessageManager final : public Actor {
 
   void edit_inline_message_live_location(const string &inline_message_id,
                                          td_api::object_ptr<td_api::ReplyMarkup> &&reply_markup,
-                                         td_api::object_ptr<td_api::location> &&input_location, int32 live_period,
-                                         int32 heading, int32 proximity_alert_radius, Promise<Unit> &&promise);
+                                         td_api::object_ptr<td_api::liveLocation> &&input_location,
+                                         Promise<Unit> &&promise);
 
   void edit_inline_message_media(const string &inline_message_id,
                                  td_api::object_ptr<td_api::ReplyMarkup> &&reply_markup,

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -17,7 +17,7 @@ namespace td {
 template <class T, size_t N = 256>
 class StealingQueue {
  public:
-  static_assert(N > 0 && (N & (N - 1)) == 0, "");
+  static_assert(N > 0 && (N & (N - 1)) == 0);
 
   // tries to put a value
   // returns if succeeded

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -27,7 +27,7 @@ class BusinessConnectedBot {
 
   explicit BusinessConnectedBot(td_api::object_ptr<td_api::businessConnectedBot> connected_bot);
 
-  td_api::object_ptr<td_api::businessConnectedBot> get_business_connected_bot_object(Td *td) const;
+  td_api::object_ptr<td_api::businessConnectedBotInfo> get_business_connected_bot_info_object(Td *td) const;
 
   bool is_valid() const {
     return user_id_.is_valid();
@@ -55,6 +55,11 @@ class BusinessConnectedBot {
   UserId user_id_;
   BusinessRecipients recipients_;
   BusinessBotRights rights_;
+  string device_;
+  string location_;
+  int32 date_ = 0;
+
+  td_api::object_ptr<td_api::businessConnectedBot> get_business_connected_bot_object(Td *td) const;
 
   friend bool operator==(const BusinessConnectedBot &lhs, const BusinessConnectedBot &rhs);
 

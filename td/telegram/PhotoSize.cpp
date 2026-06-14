@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -493,6 +493,14 @@ td_api::object_ptr<td_api::thumbnail> get_thumbnail_object(FileManager *file_man
   return td_api::make_object<td_api::thumbnail>(get_thumbnail_format_object(format), photo_size.dimensions.width,
                                                 photo_size.dimensions.height,
                                                 file_manager->get_file_object(photo_size.file_id));
+}
+
+td_api::object_ptr<td_api::thumbnail> get_thumbnail_object(FileManager *file_manager, const PhotoSize &photo_size,
+                                                           const PhotoSize &animated_photo_size) {
+  if (animated_photo_size.file_id.is_valid()) {
+    return get_thumbnail_object(file_manager, animated_photo_size, PhotoFormat::Mpeg4);
+  }
+  return get_thumbnail_object(file_manager, photo_size, PhotoFormat::Jpeg);
 }
 
 td_api::object_ptr<td_api::photoSize> get_photo_size_object(FileManager *file_manager, const PhotoSize *photo_size) {

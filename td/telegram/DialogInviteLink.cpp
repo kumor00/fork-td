@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -79,15 +79,14 @@ DialogInviteLink::DialogInviteLink(telegram_api::object_ptr<telegram_api::Export
     request_count_ = 0;
   }
 
-  if (is_permanent_ && (!title_.empty() || expire_date_ > 0 || usage_limit_ > 0 || edit_date_ > 0 ||
-                        request_count_ > 0 || creates_join_request_)) {
+  if (is_permanent_ &&
+      (!title_.empty() || expire_date_ > 0 || usage_limit_ > 0 || edit_date_ > 0 || request_count_ > 0)) {
     LOG(ERROR) << "Receive wrong permanent " << full_source << ' ' << *this;
     title_.clear();
     expire_date_ = 0;
     usage_limit_ = 0;
     edit_date_ = 0;
     request_count_ = 0;
-    creates_join_request_ = false;
   }
   if (creates_join_request_ && usage_limit_ > 0) {
     LOG(ERROR) << "Receive wrong permanent " << full_source << ' ' << *this;

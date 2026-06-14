@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -22,6 +22,7 @@ MissingInvitee::MissingInvitee(telegram_api::object_ptr<telegram_api::missingInv
 
 td_api::object_ptr<td_api::failedToAddMember> MissingInvitee::get_failed_to_add_member_object(
     UserManager *user_manager) const {
+  CHECK(user_manager != nullptr);
   return td_api::make_object<td_api::failedToAddMember>(
       user_manager->get_user_id_object(user_id_, "get_failed_to_add_member_object"), premium_would_allow_invite_,
       premium_required_for_pm_);

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -14,6 +14,7 @@
 #include "td/telegram/MessageEffectId.h"
 #include "td/telegram/MessageInputReplyTo.h"
 #include "td/telegram/MessageTopic.h"
+#include "td/telegram/RichMessage.h"
 #include "td/telegram/SavedMessagesTopicId.h"
 #include "td/telegram/td_api.h"
 #include "td/telegram/telegram_api.h"
@@ -40,15 +41,17 @@ class DraftMessageContent {
 
   virtual DraftMessageContentType get_type() const = 0;
 
-  virtual td_api::object_ptr<td_api::InputMessageContent> get_draft_input_message_content_object() const = 0;
+  virtual td_api::object_ptr<td_api::DraftMessageContent> get_draft_message_content_object() const = 0;
 
   virtual ~DraftMessageContent() = default;
 };
 
 class DraftMessage {
   int32 date_ = 0;
+  bool is_rich_ = false;
   MessageInputReplyTo message_input_reply_to_;
   InputMessageText input_message_text_;
+  RichMessage rich_message_;
   unique_ptr<DraftMessageContent> local_content_;
   MessageEffectId message_effect_id_;
   unique_ptr<SuggestedPost> suggested_post_;
@@ -75,6 +78,8 @@ class DraftMessage {
   bool need_clear_local(MessageContentType content_type) const;
 
   bool need_update_to(const DraftMessage &other, bool from_update) const;
+
+  static unique_ptr<DraftMessage> clone(const unique_ptr<DraftMessage> &draft_message);
 
   void add_dependencies(Dependencies &dependencies) const;
 

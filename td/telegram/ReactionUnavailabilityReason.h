@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -10,6 +10,6 @@
 
 namespace td {
 
-enum class ReactionUnavailabilityReason : int32 { None, AnonymousAdministrator, Guest };
+enum class ReactionUnavailabilityReason : int32 { None, AnonymousAdministrator, Guest, Restricted };
 
 }  // namespace td

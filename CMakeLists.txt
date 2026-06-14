@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
-project(TDLib VERSION 1.8.56 LANGUAGES CXX C)
+project(TDLib VERSION 1.8.65 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_MODULE_PATH)
   set(CMAKE_MODULE_PATH "")
@@ -119,10 +119,9 @@ if (MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
   endif()
 
-  if (TD_ENABLE_JNI)
-    # https://github.com/tdlib/td/issues/2912
-    add_definitions(-D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
-  endif()
+  # https://github.com/tdlib/td/issues/2912
+  # https://github.com/tdlib/td/issues/3202
+  add_definitions(-D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
 endif()
 
 if (CLANG OR GCC)
@@ -342,12 +341,16 @@ set(TD_MTPROTO_SOURCE
 
 set(TDLIB_SOURCE_PART1
   td/telegram/AccountManager.cpp
+  td/telegram/ActiveStoryState.cpp
   td/telegram/AffiliateType.cpp
   td/telegram/AgeVerificationParameters.cpp
+  td/telegram/AiComposeTone.cpp
+  td/telegram/AiComposeToneExample.cpp
   td/telegram/AlarmManager.cpp
   td/telegram/AnimationsManager.cpp
   td/telegram/Application.cpp
   td/telegram/AttachMenuManager.cpp
+  td/telegram/AuctionBidLevel.cpp
   td/telegram/AudiosManager.cpp
   td/telegram/AuthManager.cpp
   td/telegram/AutoDownloadSettings.cpp
@@ -358,6 +361,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/BaseTheme.cpp
   td/telegram/Birthdate.cpp
   td/telegram/BoostManager.cpp
+  td/telegram/BotAccessSettings.cpp
   td/telegram/BotCommand.cpp
   td/telegram/BotCommandScope.cpp
   td/telegram/BotInfoManager.cpp
@@ -412,6 +416,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/DialogId.cpp
   td/telegram/DialogInviteLink.cpp
   td/telegram/DialogInviteLinkManager.cpp
+  td/telegram/DialogListId.cpp
   td/telegram/DialogLocation.cpp
   td/telegram/DialogManager.cpp
   td/telegram/DialogNotificationSettings.cpp
@@ -420,6 +425,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/DialogParticipantManager.cpp
   td/telegram/DialogPhoto.cpp
   td/telegram/DialogSource.cpp
+  td/telegram/DiffText.cpp
   td/telegram/Dimensions.cpp
   td/telegram/DisallowedGiftsSettings.cpp
   td/telegram/Document.cpp
@@ -428,6 +434,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/DownloadManagerCallback.cpp
   td/telegram/DraftMessage.cpp
   td/telegram/EmailVerification.cpp
+  td/telegram/EmojiGameInfo.cpp
   td/telegram/EmojiGroup.cpp
   td/telegram/EmojiGroupType.cpp
   td/telegram/EmojiStatus.cpp
@@ -450,10 +457,12 @@ set(TDLIB_SOURCE_PART1
   td/telegram/files/FileStatsWorker.cpp
   td/telegram/files/FileType.cpp
   td/telegram/files/FileUploader.cpp
+  td/telegram/files/FileUploadId.cpp
   td/telegram/files/FileUploadManager.cpp
   td/telegram/files/PartsManager.cpp
   td/telegram/files/ResourceManager.cpp
   td/telegram/files/ResourceState.cpp
+  td/telegram/FormattedDate.cpp
   td/telegram/ForumTopic.cpp
   td/telegram/ForumTopicEditedData.cpp
   td/telegram/ForumTopicIcon.cpp
@@ -466,6 +475,8 @@ set(TDLIB_SOURCE_PART1
   td/telegram/GlobalPrivacySettings.cpp
   td/telegram/GroupCallJoinParameters.cpp
   td/telegram/GroupCallManager.cpp
+  td/telegram/GroupCallMessage.cpp
+  td/telegram/GroupCallMessageLimit.cpp
   td/telegram/GroupCallParticipant.cpp
   td/telegram/GroupCallParticipantOrder.cpp
   td/telegram/GroupCallVideoPayload.cpp
@@ -473,12 +484,15 @@ set(TDLIB_SOURCE_PART1
   td/telegram/InlineMessageManager.cpp
   td/telegram/InlineQueriesManager.cpp
   td/telegram/InputBusinessChatLink.cpp
+  td/telegram/InputCallId.cpp
   td/telegram/InputDialogId.cpp
   td/telegram/InputGroupCall.cpp
   td/telegram/InputGroupCallId.cpp
   td/telegram/InputInvoice.cpp
   td/telegram/InputMessageText.cpp
+  td/telegram/JoinChatBotResult.cpp
   td/telegram/JsonValue.cpp
+  td/telegram/KeyboardButtonStyle.cpp
   td/telegram/LanguagePackManager.cpp
   td/telegram/LinkManager.cpp
   td/telegram/Location.cpp
@@ -488,6 +502,8 @@ set(TDLIB_SOURCE_PART1
   td/telegram/MediaAreaCoordinates.cpp
   td/telegram/MessageContent.cpp
   td/telegram/MessageContentType.cpp
+  td/telegram/MessageCopyOptions.cpp
+  td/telegram/MessageCover.cpp
   td/telegram/MessageDb.cpp
   td/telegram/MessageEntity.cpp
   td/telegram/MessageExtendedMedia.cpp
@@ -506,6 +522,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/MessageSearchOffset.cpp
   td/telegram/MessageSelfDestructType.cpp
   td/telegram/MessageSender.cpp
+  td/telegram/MessageSendOptions.cpp
   td/telegram/MessagesInfo.cpp
   td/telegram/MessagesManager.cpp
   td/telegram/MessageSource.cpp
@@ -531,6 +548,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/net/NetQueryVerifier.cpp
   td/telegram/net/NetStatsManager.cpp
   td/telegram/net/Proxy.cpp
+  td/telegram/net/ProxyChecker.cpp
   td/telegram/net/PublicRsaKeySharedCdn.cpp
   td/telegram/net/PublicRsaKeySharedMain.cpp
   td/telegram/net/PublicRsaKeyWatchdog.cpp
@@ -551,6 +569,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/OrderInfo.cpp
   td/telegram/Outline.cpp
   td/telegram/PaidReactionType.cpp
+  td/telegram/Passkey.cpp
   td/telegram/PasswordManager.cpp
   td/telegram/Payments.cpp
   td/telegram/PeerColor.cpp
@@ -561,6 +580,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/PhotoSize.cpp
   td/telegram/PhotoSizeSource.cpp
   td/telegram/PollManager.cpp
+  td/telegram/PollOption.cpp
   td/telegram/Premium.cpp
   td/telegram/PremiumGiftOption.cpp
   td/telegram/PrivacyManager.cpp
@@ -585,6 +605,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/RequestedDialogType.cpp
   td/telegram/Requests.cpp
   td/telegram/RestrictionReason.cpp
+  td/telegram/RichMessage.cpp
   td/telegram/SavedMessagesManager.cpp
   td/telegram/SavedMessagesTopicId.cpp
   td/telegram/ScopeNotificationSettings.cpp
@@ -606,6 +627,11 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StarGift.cpp
   td/telegram/StarGiftAttribute.cpp
   td/telegram/StarGiftAttributeId.cpp
+  td/telegram/StarGiftAttributeRarity.cpp
+  td/telegram/StarGiftAuctionRound.cpp
+  td/telegram/StarGiftAuctionState.cpp
+  td/telegram/StarGiftAuctionUserState.cpp
+  td/telegram/StarGiftBackground.cpp
   td/telegram/StarGiftCollection.cpp
   td/telegram/StarGiftId.cpp
   td/telegram/StarGiftManager.cpp
@@ -643,6 +669,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/TargetDialogTypes.cpp
   td/telegram/Td.cpp
   td/telegram/TdDb.cpp
+  td/telegram/TempPasswordState.cpp
   td/telegram/TermsOfService.cpp
   td/telegram/TermsOfServiceManager.cpp
   td/telegram/ThemeManager.cpp
@@ -658,6 +685,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/TranscriptionManager.cpp
   td/telegram/TranslationManager.cpp
   td/telegram/UpdatesManager.cpp
+  td/telegram/UserId.cpp
   td/telegram/UserManager.cpp
   td/telegram/Usernames.cpp
   td/telegram/UserPrivacySetting.cpp
@@ -671,19 +699,26 @@ set(TDLIB_SOURCE_PART2
   td/telegram/WebApp.cpp
   td/telegram/WebAppManager.cpp
   td/telegram/WebAppOpenParameters.cpp
+  td/telegram/WebBrowserManager.cpp
+  td/telegram/WebBrowserSettings.cpp
+  td/telegram/WebDomainException.cpp
   td/telegram/WebPageBlock.cpp
   td/telegram/WebPagesManager.cpp
 
   td/telegram/AccentColorId.h
   td/telegram/AccessRights.h
   td/telegram/AccountManager.h
+  td/telegram/ActiveStoryState.h
   td/telegram/AffectedHistory.h
   td/telegram/AffiliateType.h
   td/telegram/AgeVerificationParameters.h
+  td/telegram/AiComposeTone.h
+  td/telegram/AiComposeToneExample.h
   td/telegram/AlarmManager.h
   td/telegram/AnimationsManager.h
   td/telegram/Application.h
   td/telegram/AttachMenuManager.h
+  td/telegram/AuctionBidLevel.h
   td/telegram/AudiosManager.h
   td/telegram/AuthManager.h
   td/telegram/AutoDownloadSettings.h
@@ -698,6 +733,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/BotVerifierSettings.h
   td/telegram/BlockListId.h
   td/telegram/BoostManager.h
+  td/telegram/BotAccessSettings.h
   td/telegram/BotCommand.h
   td/telegram/BotCommandScope.h
   td/telegram/BotInfoManager.h
@@ -771,6 +807,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/DialogParticipantManager.h
   td/telegram/DialogPhoto.h
   td/telegram/DialogSource.h
+  td/telegram/DiffText.h
   td/telegram/Dimensions.h
   td/telegram/DisallowedGiftsSettings.h
   td/telegram/Document.h
@@ -779,6 +816,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/DownloadManagerCallback.h
   td/telegram/DraftMessage.h
   td/telegram/EmailVerification.h
+  td/telegram/EmojiGameInfo.h
   td/telegram/EmojiGroup.h
   td/telegram/EmojiGroupType.h
   td/telegram/EmojiStatus.h
@@ -814,6 +852,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/files/ResourceManager.h
   td/telegram/files/ResourceState.h
   td/telegram/FolderId.h
+  td/telegram/FormattedDate.h
   td/telegram/ForumTopic.h
   td/telegram/ForumTopicEditedData.h
   td/telegram/ForumTopicFullId.h
@@ -830,6 +869,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/GroupCallJoinParameters.h
   td/telegram/GroupCallId.h
   td/telegram/GroupCallManager.h
+  td/telegram/GroupCallMessage.h
+  td/telegram/GroupCallMessageLimit.h
   td/telegram/GroupCallParticipant.h
   td/telegram/GroupCallParticipantOrder.h
   td/telegram/GroupCallVideoPayload.h
@@ -837,12 +878,15 @@ set(TDLIB_SOURCE_PART2
   td/telegram/InlineMessageManager.h
   td/telegram/InlineQueriesManager.h
   td/telegram/InputBusinessChatLink.h
+  td/telegram/InputCallId.h
   td/telegram/InputDialogId.h
   td/telegram/InputGroupCall.h
   td/telegram/InputGroupCallId.h
   td/telegram/InputInvoice.h
   td/telegram/InputMessageText.h
+  td/telegram/JoinChatBotResult.h
   td/telegram/JsonValue.h
+  td/telegram/KeyboardButtonStyle.h
   td/telegram/LabeledPricePart.h
   td/telegram/LanguagePackManager.h
   td/telegram/LinkManager.h
@@ -856,6 +900,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/MessageContent.h
   td/telegram/MessageContentType.h
   td/telegram/MessageCopyOptions.h
+  td/telegram/MessageCover.h
   td/telegram/MessageDb.h
   td/telegram/MessageEffectId.h
   td/telegram/MessageEntity.h
@@ -877,6 +922,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/MessageSearchOffset.h
   td/telegram/MessageSelfDestructType.h
   td/telegram/MessageSender.h
+  td/telegram/MessageSendOptions.h
   td/telegram/MessagesInfo.h
   td/telegram/MessagesManager.h
   td/telegram/MessageSource.h
@@ -907,6 +953,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/net/NetStatsManager.h
   td/telegram/net/NetType.h
   td/telegram/net/Proxy.h
+  td/telegram/net/ProxyChecker.h
   td/telegram/net/PublicRsaKeySharedCdn.h
   td/telegram/net/PublicRsaKeySharedMain.h
   td/telegram/net/PublicRsaKeyWatchdog.h
@@ -936,6 +983,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/OrderInfo.h
   td/telegram/Outline.h
   td/telegram/PaidReactionType.h
+  td/telegram/Passkey.h
   td/telegram/PasswordManager.h
   td/telegram/Payments.h
   td/telegram/PeerColor.h
@@ -949,6 +997,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/PhotoSizeType.h
   td/telegram/PollId.h
   td/telegram/PollManager.h
+  td/telegram/PollOption.h
   td/telegram/Premium.h
   td/telegram/PremiumGiftOption.h
   td/telegram/PrivacyManager.h
@@ -979,6 +1028,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/RequestedDialogType.h
   td/telegram/Requests.h
   td/telegram/RestrictionReason.h
+  td/telegram/RichMessage.h
   td/telegram/SavedMessagesManager.h
   td/telegram/SavedMessagesTopicId.h
   td/telegram/ScheduledServerMessageId.h
@@ -1005,6 +1055,11 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StarGift.h
   td/telegram/StarGiftAttribute.h
   td/telegram/StarGiftAttributeId.h
+  td/telegram/StarGiftAttributeRarity.h
+  td/telegram/StarGiftAuctionRound.h
+  td/telegram/StarGiftAuctionState.h
+  td/telegram/StarGiftAuctionUserState.h
+  td/telegram/StarGiftBackground.h
   td/telegram/StarGiftCollection.h
   td/telegram/StarGiftCollectionId.h
   td/telegram/StarGiftId.h
@@ -1050,6 +1105,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/Td.h
   td/telegram/TdCallback.h
   td/telegram/TdDb.h
+  td/telegram/TempPasswordState.h
   td/telegram/TermsOfService.h
   td/telegram/TermsOfServiceManager.h
   td/telegram/ThemeManager.h
@@ -1081,11 +1137,16 @@ set(TDLIB_SOURCE_PART2
   td/telegram/WebApp.h
   td/telegram/WebAppManager.h
   td/telegram/WebAppOpenParameters.h
+  td/telegram/WebBrowserManager.h
+  td/telegram/WebBrowserSettings.h
+  td/telegram/WebDomainException.h
   td/telegram/WebPageBlock.h
   td/telegram/WebPageId.h
   td/telegram/WebPagesManager.h
 
   td/telegram/AgeVerificationParameters.hpp
+  td/telegram/AiComposeTone.hpp
+  td/telegram/AiComposeToneExample.hpp
   td/telegram/AnimationsManager.hpp
   td/telegram/AudiosManager.hpp
   td/telegram/AuthManager.hpp
@@ -1123,14 +1184,17 @@ set(TDLIB_SOURCE_PART2
   td/telegram/files/FileLocation.hpp
   td/telegram/files/FileManager.hpp
   td/telegram/files/FileSourceId.hpp
+  td/telegram/FormattedDate.hpp
   td/telegram/ForumTopic.hpp
   td/telegram/ForumTopicEditedData.hpp
   td/telegram/ForumTopicIcon.hpp
   td/telegram/ForumTopicInfo.hpp
   td/telegram/Game.hpp
   td/telegram/GiveawayParameters.hpp
+  td/telegram/GroupCallMessageLimit.hpp
   td/telegram/InputInvoice.hpp
   td/telegram/InputMessageText.hpp
+  td/telegram/KeyboardButtonStyle.hpp
   td/telegram/MediaArea.hpp
   td/telegram/MediaAreaCoordinates.hpp
   td/telegram/MessageEntity.hpp
@@ -1153,6 +1217,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/PhotoSizeType.hpp
   td/telegram/PollId.hpp
   td/telegram/PollManager.hpp
+  td/telegram/PollOption.hpp
   td/telegram/PremiumGiftOption.hpp
   td/telegram/ReactionManager.hpp
   td/telegram/ReactionNotificationSettings.hpp
@@ -1163,6 +1228,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/RepliedMessageInfo.hpp
   td/telegram/ReplyMarkup.hpp
   td/telegram/RequestedDialogType.hpp
+  td/telegram/RichMessage.hpp
   td/telegram/ScopeNotificationSettings.hpp
   td/telegram/SecureValue.hpp
   td/telegram/SendCodeHelper.hpp
@@ -1170,6 +1236,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StarAmount.hpp
   td/telegram/StarGift.hpp
   td/telegram/StarGiftAttribute.hpp
+  td/telegram/StarGiftAttributeRarity.hpp
+  td/telegram/StarGiftBackground.hpp
   td/telegram/StarGiftId.hpp
   td/telegram/StarGiftResalePrice.hpp
   td/telegram/StarGiftSettings.hpp
@@ -1184,6 +1252,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/SuggestedAction.hpp
   td/telegram/SuggestedPost.hpp
   td/telegram/SuggestedPostPrice.hpp
+  td/telegram/TempPasswordState.hpp
   td/telegram/TermsOfService.hpp
   td/telegram/ThemeSettings.hpp
   td/telegram/ToDoCompletion.hpp
@@ -1195,6 +1264,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/VideosManager.hpp
   td/telegram/VoiceNotesManager.hpp
   td/telegram/WebApp.hpp
+  td/telegram/WebBrowserSettings.hpp
+  td/telegram/WebDomainException.hpp
 
   ${TL_TD_AUTO_SOURCE}
 

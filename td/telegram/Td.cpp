@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -60,6 +60,7 @@
 #include "td/telegram/net/NetQueryDispatcher.h"
 #include "td/telegram/net/NetStatsManager.h"
 #include "td/telegram/net/Proxy.h"
+#include "td/telegram/net/ProxyChecker.h"
 #include "td/telegram/net/TempAuthKeyWatchdog.h"
 #include "td/telegram/NotificationManager.h"
 #include "td/telegram/NotificationSettingsManager.h"
@@ -104,6 +105,7 @@
 #include "td/telegram/VideosManager.h"
 #include "td/telegram/VoiceNotesManager.h"
 #include "td/telegram/WebAppManager.h"
+#include "td/telegram/WebBrowserManager.h"
 #include "td/telegram/WebPagesManager.h"
 
 #include "td/db/binlog/BinlogEvent.h"
@@ -161,6 +163,9 @@ bool Td::is_authentication_request(int32 id) {
     case td_api::checkAuthenticationCode::ID:
     case td_api::registerUser::ID:
     case td_api::requestQrCodeAuthentication::ID:
+    case td_api::getAuthenticationPasskeyParameters::ID:
+    case td_api::checkAuthenticationPasskey::ID:
+    case td_api::checkAuthenticationWebToken::ID:
     case td_api::resetAuthenticationEmailAddress::ID:
     case td_api::checkAuthenticationPassword::ID:
     case td_api::requestAuthenticationPasswordRecovery::ID:
@@ -233,7 +238,6 @@ bool Td::is_preauthentication_request(int32 id) {
     case td_api::disableProxy::ID:
     case td_api::removeProxy::ID:
     case td_api::getProxies::ID:
-    case td_api::getProxyLink::ID:
     case td_api::pingProxy::ID:
     case td_api::testNetwork::ID:
       return true;
@@ -445,6 +449,7 @@ void Td::start_up() {
   inc_actor_refcnt();          // guard
 
   alarm_manager_ = create_actor<AlarmManager>("AlarmManager", create_reference());
+  proxy_checker_ = create_actor<ProxyChecker>("ProxyChecker", create_reference());
 
   CHECK(state_ == State::WaitParameters);
   for (auto &update : get_fake_current_state()) {
@@ -569,6 +574,7 @@ void Td::dec_actor_refcnt() {
       reset_manager(videos_manager_, "VideosManager");
       reset_manager(voice_notes_manager_, "VoiceNotesManager");
       reset_manager(web_app_manager_, "WebAppManager");
+      reset_manager(web_browser_manager_, "WebBrowserManager");
       reset_manager(web_pages_manager_, "WebPagesManager");
 
       G()->set_option_manager(nullptr);
@@ -670,6 +676,7 @@ void Td::clear() {
   reset_actor(ActorOwn<Actor>(std::move(language_pack_manager_)));
   reset_actor(ActorOwn<Actor>(std::move(net_stats_manager_)));
   reset_actor(ActorOwn<Actor>(std::move(password_manager_)));
+  reset_actor(ActorOwn<Actor>(std::move(proxy_checker_)));
   reset_actor(ActorOwn<Actor>(std::move(secure_manager_)));
   reset_actor(ActorOwn<Actor>(std::move(secret_chats_manager_)));
   reset_actor(ActorOwn<Actor>(std::move(storage_manager_)));
@@ -744,6 +751,7 @@ void Td::clear() {
   reset_actor(ActorOwn<Actor>(std::move(video_notes_manager_actor_)));
   reset_actor(ActorOwn<Actor>(std::move(voice_notes_manager_actor_)));
   reset_actor(ActorOwn<Actor>(std::move(web_app_manager_actor_)));
+  reset_actor(ActorOwn<Actor>(std::move(web_browser_manager_actor_)));
   reset_actor(ActorOwn<Actor>(std::move(web_pages_manager_actor_)));
   LOG(DEBUG) << "All actors were cleared" << timer;
 }
@@ -769,6 +777,7 @@ void Td::close_impl(bool destroy_flag) {
     G()->set_close_flag();
     clear_requests();
     alarm_manager_.reset();
+    proxy_checker_.reset();
     send_update(td_api::make_object<td_api::updateAuthorizationState>(
         td_api::make_object<td_api::authorizationStateClosing>()));
 
@@ -913,7 +922,7 @@ void Td::init(Parameters parameters, Result<TdDb::OpenedDatabase> r_opened_datab
 
   init_managers();
 
-  init_pure_actor_managers();
+  init_pure_actor_managers(parameters);
 
   secret_chats_manager_ =
       create_actor<SecretChatsManager>("SecretChatsManager", create_reference(), parameters.use_secret_chats_);
@@ -1035,7 +1044,6 @@ void Td::init_options_and_network() {
       case td_api::disableProxy::ID:
       case td_api::removeProxy::ID:
       case td_api::getProxies::ID:
-      case td_api::getProxyLink::ID:
         return true;
       default:
         return false;
@@ -1285,6 +1293,7 @@ void Td::init_managers() {
   G()->set_transcription_manager(transcription_manager_actor_.get());
   translation_manager_ = make_unique<TranslationManager>(this, create_reference());
   translation_manager_actor_ = register_actor("TranslationManager", translation_manager_.get());
+  G()->set_translation_manager(translation_manager_actor_.get());
   updates_manager_ = make_unique<UpdatesManager>(this, create_reference());
   updates_manager_actor_ = register_actor("UpdatesManager", updates_manager_.get());
   G()->set_updates_manager(updates_manager_actor_.get());
@@ -1298,19 +1307,23 @@ void Td::init_managers() {
   web_app_manager_ = make_unique<WebAppManager>(this, create_reference());
   web_app_manager_actor_ = register_actor("WebAppManager", web_app_manager_.get());
   G()->set_web_app_manager(web_app_manager_actor_.get());
+  web_browser_manager_ = make_unique<WebBrowserManager>(this, create_reference());
+  web_browser_manager_actor_ = register_actor("WebBrowserManager", web_browser_manager_.get());
+  G()->set_web_browser_manager(web_browser_manager_actor_.get());
   web_pages_manager_ = make_unique<WebPagesManager>(this, create_reference());
   web_pages_manager_actor_ = register_actor("WebPagesManager", web_pages_manager_.get());
   G()->set_web_pages_manager(web_pages_manager_actor_.get());
 }
 
-void Td::init_pure_actor_managers() {
+void Td::init_pure_actor_managers(const Parameters &parameters) {
   cashtag_search_hints_ = create_actor<HashtagHints>("CashtagSearchHints", "cashtag_search", '$', create_reference());
   device_token_manager_ = create_actor<DeviceTokenManager>("DeviceTokenManager", create_reference());
   hashtag_hints_ = create_actor<HashtagHints>("HashtagHints", "text", '#', create_reference());
   hashtag_search_hints_ = create_actor<HashtagHints>("HashtagSearchHints", "search", '#', create_reference());
   language_pack_manager_ = create_actor<LanguagePackManager>("LanguagePackManager", create_reference());
   G()->set_language_pack_manager(language_pack_manager_.get());
-  password_manager_ = create_actor<PasswordManager>("PasswordManager", create_reference());
+  password_manager_ =
+      create_actor<PasswordManager>("PasswordManager", parameters.api_id_, parameters.api_hash_, create_reference());
   G()->set_password_manager(password_manager_.get());
   secure_manager_ = create_actor<SecureManager>("SecureManager", create_reference());
 }

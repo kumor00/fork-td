@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -17,7 +17,7 @@ namespace td {
 template <class KeyT, class ValueT, class HashT = Hash<KeyT>, class EqT = std::equal_to<KeyT>>
 class WaitFreeHashMap {
   static constexpr size_t MAX_STORAGE_COUNT = 1 << 8;
-  static_assert((MAX_STORAGE_COUNT & (MAX_STORAGE_COUNT - 1)) == 0, "");
+  static_assert((MAX_STORAGE_COUNT & (MAX_STORAGE_COUNT - 1)) == 0);
   static constexpr uint32 DEFAULT_STORAGE_SIZE = 1 << 12;
 
   FlatHashMap<KeyT, ValueT, HashT, EqT> default_map_;

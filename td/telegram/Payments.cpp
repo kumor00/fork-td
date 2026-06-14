@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -26,6 +26,7 @@
 #include "td/telegram/SuggestedAction.h"
 #include "td/telegram/Td.h"
 #include "td/telegram/telegram_api.h"
+#include "td/telegram/TempPasswordState.h"
 #include "td/telegram/ThemeManager.h"
 #include "td/telegram/UpdatesManager.h"
 #include "td/telegram/UserId.h"
@@ -118,11 +119,7 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
         }
         case td_api::telegramPaymentPurposePremiumGiftCodes::ID: {
           auto p = static_cast<td_api::telegramPaymentPurposePremiumGiftCodes *>(invoice->purpose_.get());
-          vector<telegram_api::object_ptr<telegram_api::InputUser>> input_users;
-          for (auto user_id : p->user_ids_) {
-            TRY_RESULT(input_user, td->user_manager_->get_input_user(UserId(user_id)));
-            input_users.push_back(std::move(input_user));
-          }
+          TRY_RESULT(input_users, td->user_manager_->get_input_users(UserId::get_user_ids(p->user_ids_)));
           TRY_STATUS(check_payment_amount(p->currency_, p->amount_));
           DialogId boosted_dialog_id(p->boosted_chat_id_);
           TRY_RESULT(boost_input_peer, get_boost_input_peer(td, boosted_dialog_id));

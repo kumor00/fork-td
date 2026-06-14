@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -11,6 +11,7 @@
 #include "td/telegram/files/FileId.h"
 #include "td/telegram/files/FileSourceId.h"
 #include "td/telegram/MessageFullId.h"
+#include "td/telegram/PollId.h"
 #include "td/telegram/QuickReplyMessageFullId.h"
 #include "td/telegram/StoryFullId.h"
 #include "td/telegram/td_api.h"
@@ -55,6 +56,8 @@ class WebPagesManager final : public Actor {
 
   static string get_web_page_url(const tl_object_ptr<telegram_api::WebPage> &web_page_ptr);
 
+  void on_load_web_page_url_from_database(WebPageId web_page_id, const string &url);
+
   WebPageId on_get_web_page(tl_object_ptr<telegram_api::WebPage> &&web_page_ptr, DialogId owner_dialog_id);
 
   void on_get_web_page_by_url(const string &url, WebPageId web_page_id, bool from_database);
@@ -70,6 +73,8 @@ class WebPagesManager final : public Actor {
 
   void unregister_quick_reply_web_page(WebPageId web_page_id, QuickReplyMessageFullId message_full_id,
                                        const char *source);
+
+  void register_poll_web_pages(PollId poll_id, vector<WebPageId> &&web_page_ids);
 
   bool have_web_page(WebPageId web_page_id) const;
 
@@ -141,7 +146,8 @@ class WebPagesManager final : public Actor {
   td_api::object_ptr<td_api::LinkPreviewType> get_link_preview_type_album_object(
       const WebPageInstantView &instant_view) const;
 
-  td_api::object_ptr<td_api::LinkPreviewType> get_link_preview_type_object(const WebPage *web_page) const;
+  td_api::object_ptr<td_api::LinkPreviewType> get_link_preview_type_object(const WebPage *web_page,
+                                                                           bool &need_reload) const;
 
   td_api::object_ptr<td_api::webPageInstantView> get_web_page_instant_view_object(
       WebPageId web_page_id, const WebPageInstantView *web_page_instant_view, Slice web_page_url) const;
@@ -211,6 +217,8 @@ class WebPagesManager final : public Actor {
   ActorShared<> parent_;
   WaitFreeHashMap<WebPageId, unique_ptr<WebPage>, WebPageIdHash> web_pages_;
 
+  FlatHashMap<WebPageId, string, WebPageIdHash> pending_web_page_urls_;
+
   FlatHashMap<WebPageId, vector<Promise<Unit>>, WebPageIdHash> load_web_page_from_database_queries_;
   FlatHashSet<WebPageId, WebPageIdHash> loaded_from_database_web_pages_;
 
@@ -218,8 +226,12 @@ class WebPagesManager final : public Actor {
   FlatHashMap<WebPageId, vector<Promise<WebPageId>>, WebPageIdHash> load_server_web_page_instant_view_queries_;
 
   FlatHashMap<WebPageId, FlatHashSet<MessageFullId, MessageFullIdHash>, WebPageIdHash> web_page_messages_;
+
   FlatHashMap<WebPageId, FlatHashSet<QuickReplyMessageFullId, QuickReplyMessageFullIdHash>, WebPageIdHash>
       web_page_quick_reply_messages_;
+
+  FlatHashMap<WebPageId, FlatHashSet<PollId, PollIdHash>, WebPageIdHash> web_page_polls_;
+  FlatHashMap<PollId, vector<WebPageId>, PollIdHash> poll_web_pages_;
 
   FlatHashMap<WebPageId,
               vector<std::pair<unique_ptr<GetWebPagePreviewOptions>, Promise<td_api::object_ptr<td_api::linkPreview>>>>,

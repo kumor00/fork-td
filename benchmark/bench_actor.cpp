@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -87,7 +87,7 @@ class RingBench final : public td::Benchmark {
  public:
   td::string get_description() const final {
     static const char *types[] = {"later", "immediate", "raw", "tail", "lambda"};
-    static_assert(0 <= type && type < 5, "");
+    static_assert(0 <= type && type < 5);
     return PSTRING() << "Ring (send_" << types[type] << ") (threads_n = " << thread_n_ << ")";
   }
 
@@ -174,7 +174,7 @@ class QueryBench final : public td::Benchmark {
  public:
   td::string get_description() const final {
     static const char *types[] = {"callback", "immediate future", "delayed future", "dummy", "lambda", "lambda_future"};
-    static_assert(0 <= type && type < 6, "");
+    static_assert(0 <= type && type < 6);
     return PSTRING() << "QueryBench: " << types[type];
   }
 

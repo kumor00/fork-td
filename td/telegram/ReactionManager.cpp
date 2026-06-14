@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -91,11 +91,9 @@ class GetReactionListQuery final : public Td::ResultHandler {
 
   void on_result(BufferSlice packet) final {
     static_assert(std::is_same<telegram_api::messages_getRecentReactions::ReturnType,
-                               telegram_api::messages_getTopReactions::ReturnType>::value,
-                  "");
+                               telegram_api::messages_getTopReactions::ReturnType>::value);
     static_assert(std::is_same<telegram_api::messages_getRecentReactions::ReturnType,
-                               telegram_api::messages_getDefaultTagReactions::ReturnType>::value,
-                  "");
+                               telegram_api::messages_getDefaultTagReactions::ReturnType>::value);
     auto result_ptr = fetch_result<telegram_api::messages_getRecentReactions>(packet);
     if (result_ptr.is_error()) {
       return on_error(result_ptr.move_as_error());
@@ -648,6 +646,9 @@ td_api::object_ptr<td_api::availableReactions> ReactionManager::get_sorted_avail
       break;
     case ReactionUnavailabilityReason::Guest:
       reason = td_api::make_object<td_api::reactionUnavailabilityReasonGuest>();
+      break;
+    case ReactionUnavailabilityReason::Restricted:
+      reason = td_api::make_object<td_api::reactionUnavailabilityReasonRestricted>();
       break;
     default:
       UNREACHABLE();

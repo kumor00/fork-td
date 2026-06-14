@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -28,6 +28,8 @@ class CountryInfoManager final : public Actor {
   CountryInfoManager(Td *td, ActorShared<> parent);
 
   void get_countries(Promise<td_api::object_ptr<td_api::countries>> &&promise);
+
+  void get_country(const string &country_code, Promise<td_api::object_ptr<td_api::countryInfo>> &&promise);
 
   void get_current_country_code(Promise<string> &&promise);
 
@@ -61,6 +63,9 @@ class CountryInfoManager final : public Actor {
 
   void do_get_countries(string language_code, bool is_recursive,
                         Promise<td_api::object_ptr<td_api::countries>> &&promise);
+
+  void do_get_country(const string &country_code, string language_code, bool is_recursive,
+                      Promise<td_api::object_ptr<td_api::countryInfo>> &&promise);
 
   void do_get_phone_number_info(string phone_number_prefix, string language_code, bool is_recursive,
                                 Promise<td_api::object_ptr<td_api::phoneNumberInfo>> &&promise);

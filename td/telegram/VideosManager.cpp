@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -7,10 +7,11 @@
 #include "td/telegram/VideosManager.h"
 
 #include "td/telegram/AuthManager.h"
+#include "td/telegram/Document.h"
 #include "td/telegram/DocumentsManager.h"
+#include "td/telegram/files/FileLocation.h"
 #include "td/telegram/files/FileManager.h"
 #include "td/telegram/Global.h"
-#include "td/telegram/PhotoFormat.h"
 #include "td/telegram/secret_api.h"
 #include "td/telegram/Td.h"
 #include "td/telegram/td_api.h"
@@ -46,17 +47,38 @@ const string &VideosManager::get_video_mime_type(FileId file_id) const {
   return video->mime_type;
 }
 
-td_api::object_ptr<td_api::video> VideosManager::get_video_object(FileId file_id) const {
+td_api::object_ptr<td_api::video> VideosManager::get_video_object(FileId file_id,
+                                                                  const vector<FileId> &alternative_file_ids) const {
   if (!file_id.is_valid()) {
     return nullptr;
   }
 
   auto video = get_video(file_id);
   CHECK(video != nullptr);
-  auto thumbnail = video->animated_thumbnail.file_id.is_valid()
-                       ? get_thumbnail_object(td_->file_manager_.get(), video->animated_thumbnail, PhotoFormat::Mpeg4)
-                       : get_thumbnail_object(td_->file_manager_.get(), video->thumbnail, PhotoFormat::Jpeg);
-  return td_api::make_object<td_api::video>(video->duration, video->dimensions.width, video->dimensions.height,
+  auto thumbnail = get_thumbnail_object(td_->file_manager_.get(), video->thumbnail, video->animated_thumbnail);
+  auto duration = video->duration;
+  if ((duration == 0 || thumbnail == nullptr) && !alternative_file_ids.empty()) {
+    int32 common_duration = 0;
+    for (auto alternative_file_id : alternative_file_ids) {
+      auto alternative_video = get_video(alternative_file_id);
+      CHECK(alternative_video != nullptr);
+      if (alternative_video->duration > 0) {
+        if (common_duration == 0) {
+          common_duration = alternative_video->duration;
+        } else if (common_duration != alternative_video->duration) {
+          common_duration = -1;
+        }
+      }
+      if (thumbnail == nullptr) {
+        thumbnail = get_thumbnail_object(td_->file_manager_.get(), alternative_video->thumbnail,
+                                         alternative_video->animated_thumbnail);
+      }
+    }
+    if (duration == 0 && common_duration > 0) {
+      duration = common_duration;
+    }
+  }
+  return td_api::make_object<td_api::video>(duration, video->dimensions.width, video->dimensions.height,
                                             video->file_name, video->mime_type, video->has_stickers,
                                             video->supports_streaming, get_minithumbnail_object(video->minithumbnail),
                                             std::move(thumbnail), td_->file_manager_->get_file_object(file_id));
@@ -69,9 +91,7 @@ td_api::object_ptr<td_api::storyVideo> VideosManager::get_story_video_object(Fil
 
   auto video = get_video(file_id);
   CHECK(video != nullptr);
-  auto thumbnail = video->animated_thumbnail.file_id.is_valid()
-                       ? get_thumbnail_object(td_->file_manager_.get(), video->animated_thumbnail, PhotoFormat::Mpeg4)
-                       : get_thumbnail_object(td_->file_manager_.get(), video->thumbnail, PhotoFormat::Jpeg);
+  auto thumbnail = get_thumbnail_object(td_->file_manager_.get(), video->thumbnail, video->animated_thumbnail);
   return td_api::make_object<td_api::storyVideo>(
       video->precise_duration, video->dimensions.width, video->dimensions.height, video->has_stickers,
       video->is_animation, get_minithumbnail_object(video->minithumbnail), std::move(thumbnail),
@@ -398,6 +418,41 @@ telegram_api::object_ptr<telegram_api::InputMedia> VideosManager::get_story_docu
       flags, true, false, false,
       telegram_api::make_object<telegram_api::inputFileStoryDocument>(main_remote_location->as_input_document()),
       nullptr, mime_type, std::move(attributes), std::move(added_stickers), nullptr, 0, 0);
+}
+
+telegram_api::object_ptr<telegram_api::InputMedia> VideosManager::get_video_cover_input_media(
+    FileId file_id, bool force, bool allow_external) const {
+  auto input_media = get_input_media(file_id, nullptr, nullptr, Photo(), 0, 0, false);
+  if (input_media == nullptr || (!allow_external && input_media->get_id() != telegram_api::inputMediaDocument::ID)) {
+    return nullptr;
+  }
+  auto file_reference = FileManager::extract_file_reference(input_media);
+  if (file_reference == FileReferenceView::invalid_file_reference()) {
+    if (!force) {
+      LOG(INFO) << "Have invalid file reference for video cover " << file_id;
+      return nullptr;
+    }
+  }
+  return input_media;
+}
+
+FileId VideosManager::get_live_photo_video_file_id(telegram_api::object_ptr<telegram_api::Document> document,
+                                                   DialogId owner_dialog_id, bool is_self_destructing) const {
+  CHECK(document != nullptr);
+  int32 video_id = document->get_id();
+  if (video_id == telegram_api::documentEmpty::ID) {
+    LOG(ERROR) << "Receive empty video document in a live photo";
+    return FileId();
+  }
+  CHECK(video_id == telegram_api::document::ID);
+  auto video = telegram_api::move_object_as<telegram_api::document>(document);
+  auto parsed_document = td_->documents_manager_->on_get_document(
+      std::move(video), owner_dialog_id, is_self_destructing, true, nullptr, Document::Type::Video);
+  if (parsed_document.is_empty() || parsed_document.type != Document::Type::Video) {
+    LOG(ERROR) << "Receive invalid live photo video " << parsed_document;
+    return FileId();
+  }
+  return parsed_document.file_id;
 }
 
 string VideosManager::get_video_search_text(FileId file_id) const {

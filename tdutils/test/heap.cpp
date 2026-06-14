@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -23,7 +23,7 @@ TEST(Heap, sort_random_perm) {
     v[i] = i;
   }
   td::Random::Xorshift128plus rnd(123);
-  td::rand_shuffle(td::as_mutable_span(v), rnd);
+  td::Random::shuffle(td::as_mutable_span(v), rnd);
   td::vector<td::HeapNode> nodes(n);
   td::KHeap<int> kheap;
   for (int i = 0; i < n; i++) {

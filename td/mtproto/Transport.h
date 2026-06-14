@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -87,7 +87,7 @@ class Transport {
   // Returns size of MTProto packet.
   // If dest.size() >= size, the packet is also written into [dest].
   // If auth_key is nonempty, encryption will be used.
-  static Result<ReadResult> read(MutableSlice message, const AuthKey &auth_key,
+  static Result<ReadResult> read(MutableSlice message, int32 error_code, const AuthKey &auth_key,
                                  PacketInfo *packet_info) TD_WARN_UNUSED_RESULT;
 
   static BufferWriter write(const Storer &storer, const AuthKey &auth_key, PacketInfo *packet_info,
